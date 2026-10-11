@@ -1,0 +1,7 @@
+build/
+*.bin
+*.elf
+*.map
+__pycache__/
+.DS_Store
+*.bak
