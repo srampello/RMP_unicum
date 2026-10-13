@@ -11,7 +11,7 @@ constexpr uint8_t SENSOR_COUNT=12;
 constexpr uint8_t SENSOR_CHANNELS[SENSOR_COUNT]={0,1,2,3,4,5,6,7,8,9,10,11};
 constexpr uint8_t MUX_SELECT_PINS[4]={2,8,20,21}; // S0..S3
 constexpr uint8_t MUX_SIG=0; // ADC1_CH0: lectura con Wi-Fi activo
-constexpr uint8_t STRATEGY_CHANNELS[3]={12,13,14}; // Selector 1P3T, común a GND
+constexpr uint8_t STRATEGY_CHANNELS[3]={12,13,14}; // DIP 3 vias, un contacto por canal y otro a GND
 constexpr uint8_t MICROSTART_PIN=3, CAL_BUTTON=9; // BOOT, activo LOW
 constexpr uint8_t AIN1=4, AIN2=5, PWMA=1;
 constexpr uint8_t BIN1=6, BIN2=7, PWMB=10;

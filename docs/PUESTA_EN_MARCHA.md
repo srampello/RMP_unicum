@@ -20,8 +20,8 @@
 3. Cargar `RMP_UNICUM_SENSORES`. C0..C11 deben seguir S01..S12 izquierda→derecha.
    Blanco baja raw, negro lo sube. AP RMP_UNICUM_TEST activo para comprobar lectura
    con Wi-Fi encendido; el sketch no sirve una web y nunca mueve motores.
-4. Probar las tres posiciones del selector: elegido cerca de 0, otros altos.
-   Monitor informa posición 1/2/3; 0=inválido. C15 a GND. No dejar receptor flotante.
+4. Probar el DIP: activar SW1, SW2 y SW3 de a uno; elegido cerca de 0, otros altos.
+   Monitor informa selección 1/2/3; todos OFF o varios ON dan 0=inválido. C15 a GND. No dejar receptor flotante.
 5. Ruedas levantadas y alimentación VM regulada: cargar prueba motores. MicroStart
    debe estar LOW y luego recibir START; cerrar habilitación STBY. Enviar `l 80`,
    `r 80`, `b 80`. Positivo debe avanzar; cambiar cables o `INVERT_LEFT/RIGHT` si
@@ -32,7 +32,7 @@
 
 ## Firmware principal
 
-1. Cargar `RMP_UNICUM`; selector en 1 y MicroStart STOP. Arranca con motores a cero.
+1. Cargar `RMP_UNICUM`; solo SW1 ON (SW2/SW3 OFF) y MicroStart STOP. Arranca con motores a cero.
 2. Conectar Wi-Fi **RMP_UNICUM**, clave **Unicum2026**, abrir **http://192.168.4.1**.
    Cambiar clave en Config.h si corresponde. Wi-Fi no se apaga durante la carrera.
 3. Calibrar: BOOT largo ≥1,2 s, USB `cal` o “Calibrar 8 s” en web. Mover manualmente
@@ -65,7 +65,7 @@ no se detecta en software. Antes de cerrarlo, mandar STOP y detener el controlad
 | `sensors` | Lecturas, min/max, selector y MicroStart |
 
 No hay comando `start` ni arranque forzado desde web. Perfil a usar lo determina
-el selector 1P3T; editar otro perfil en web no lo selecciona para correr. Guardar
+el DIP de tres vías; editar otro perfil en web no lo selecciona para correr. Guardar
 con MicroStart STOP; confirmar mensaje de estado tras “orden en cola”.
 
 ## Ajuste en pista

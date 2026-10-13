@@ -2,7 +2,7 @@
 
 Seguidor de línea de **RMP Robotics**: **ESP32-C3 Super Mini**, barra de **12
 QRE1113GR**, **74HC4067**, **TB6612FNG**, dos **N20 6 V / 2000 RPM**, selector
-físico de tres estrategias y arranque/parada por **MicroStart JSumo**.
+**DIP switch de tres vías** para las velocidades de largada y arranque/parada por **MicroStart JSumo**.
 
 **Esta versión reemplaza el mapa WROOM con entradas directas. No reutilizar su
 cableado.** La versión anterior queda en el historial de Git.
@@ -13,7 +13,7 @@ cableado.** La versión anterior queda en el historial de Git.
 | --- | --- |
 | Sensores | S01..S12, izquierda a derecha, a C0..C11 del 74HC4067 |
 | Lectura | SIG del MUX a GPIO0 / ADC1 del ESP32-C3 |
-| Selector | Rotativo 1P3T; contactos a C12/C13/C14, común a GND |
+| Selector | DIP 3 vías; cada interruptor entre C12/C13/C14 y GND |
 | Driver | TB6612: A=izquierdo, B=derecho, dirección + PWM por motor |
 | Arranque/parada | MicroStart a GPIO3 y a STBY; alimentado a 3,3 V |
 | Wi-Fi | Permanece activo; lectura de los 12 sensores por ADC1 |
@@ -58,7 +58,7 @@ no Bluetooth Classic/SPP ni un servicio BLE.
 1. Probar sensores, selector y MicroStart; luego dirección de motores.
 2. MicroStart en STOP. Mantener BOOT 1,2 s o pulsar “Calibrar 8 s” en la web.
    Mover manualmente toda la barra sobre blanco y negro. Línea blanca por defecto.
-3. Selector en estrategia 1. Con calibración válida, el robot se arma automáticamente
+3. DIP: solo SW1 en ON (SW2/SW3 OFF). Con calibración válida, el robot se arma automáticamente
    al encender o completar calibración, mientras MicroStart esté LOW.
 4. Colocar barra sobre línea y enviar START al MicroStart. No se fuerza la marcha
    desde la web. Arranque sin demora adicional por defecto.

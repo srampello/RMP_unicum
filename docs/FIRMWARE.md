@@ -2,7 +2,7 @@
 
 ## Lectura y telemetría
 
-GPIO0=ADC1_CH0. C0..C11 contienen la barra; C12..C14 el selector 1P3T. S0..S3
+GPIO0=ADC1_CH0. C0..C11 contienen la barra; C12..C14 el DIP de tres vías. S0..S3
 seleccionan binariamente cada canal; esperar 120 µs, descartar una conversión y
 promediar dos muestras. Solo la tarea de control accede al MUX/ADC. El servidor
 web lee una copia del estado, nunca conmuta el MUX.
@@ -22,8 +22,9 @@ Las operaciones NVS se hacen detenido. No imprimir sensores desde el control.
 
 ## Selector y START/STOP
 
-Selector de tres contactos mediante los canales libres del MUX: exactamente uno
-LOW y dos HIGH. Estado estable 50 ms, consultado cada 25 ms. Perfil de carrera
+DIP de tres interruptores independientes mediante los canales libres del MUX: exactamente uno
+LOW y dos HIGH. ON conecta su canal a GND (LOW). Todos OFF o más de uno ON bloquean START.
+Estado estable 50 ms, consultado cada 25 ms. Perfil de carrera
 se captura al START; cambiar el switch en marcha no altera ganancias/velocidades.
 
 MicroStart alimentado a 3,3 V, HIGH=START, LOW=STOP. Su SIGNAL también llega a

@@ -13,7 +13,7 @@ RBOOT2-RBOOT8,2,Pullup strapping,10k ohm,GPIO2/8 a 3.3V
 RIN1-RIN4,4,Pulldown direccion motor,10k ohm,A GND evita pulsos boot UART
 RPWMA-RPWMB,2,Pulldown PWM,10k ohm,A GND
 RSTBY,1,Pulldown STBY,10k ohm,A GND despues de interruptor
-SEL,1,Selector rotativo,1P3T tres posiciones,COM a GND contactos C12..14
+SEL,1,DIP switch,3 vias SPST seis terminales,Un interruptor por C12..14 con retorno GND
 SW_STBY,1,Interruptor habilitacion,Serie entre SIGNAL y STBY,STOP antes de cerrar
 J1,1,Conector barra,1x15 polarizado preferible,S01..12 mas 5V 3.3V GND
 J2,1,Conector MicroStart,3 contactos,Respetar orden fisico real

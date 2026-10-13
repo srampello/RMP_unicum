@@ -62,8 +62,9 @@ suponiendo que una salida GPIO3V3 satisface sus umbrales. Pull-ups de receptores
 siempre a 3V3. Desacoplar VCC del MUX con 100 nF junto al chip/módulo.
 
 Añadir pull-ups de 10 kΩ en GPIO2 y GPIO8 (S0/S1) para strapping, y de 10 kΩ en
-C12/C13/C14 para selector. El selector 1P3T conecta exactamente uno a GND. Sin
-contacto o con dos contactos seleccionados, inicio bloqueado.
+C12/C13/C14 para selector. El DIP tiene tres interruptores independientes,
+cada uno entre un canal y GND. Activar solo SW1, SW2 o SW3; todos OFF o dos/tres
+ON bloquean START. No existe COM interno: unir los tres retornos a GND externamente.
 
 MicroStart alimentado a 3V3, compatible según JSumo. SIGNAL va a GPIO3 y a STBY
 por interruptor de habilitación; STBY con 10 kΩ a GND. Con STOP (LOW), driver en

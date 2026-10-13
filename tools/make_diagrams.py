@@ -21,7 +21,7 @@ for i in range(12):
 s+=box(760,120,465,325)+txt(782,155,'TB6612FNG · N20 ×2',24)
 rows=[f'AIN1 ← {scalar("AIN1")}    AIN2 ← {scalar("AIN2")}    PWMA ← {scalar("PWMA")}',f'BIN1 ← {scalar("BIN1")}    BIN2 ← {scalar("BIN2")}    PWMB ← {scalar("PWMB")}','Canal A: izquierdo · Canal B: derecho','VCC 3,3 V · VM 6 V regulados','PWM1/10 y AIN/BIN: 10 kΩ a GND','STBY ← SIGNAL por interruptor','STBY LOW: alta impedancia / rueda libre']
 for i,t in enumerate(rows):s+=txt(782,197+i*33,t,18)
-s+=box(760,475,465,120)+txt(782,511,'Selector rotativo 1P3T',23)+txt(782,544,'COM → GND · contactos → C12/C13/C14',17)+txt(782,576,'Cada canal: 10 kΩ a 3,3 V · solo uno LOW',17,'#baa2d9')
+s+=box(760,475,465,120)+txt(782,511,'DIP switch · 3 vías',23)+txt(782,544,'SW1 / SW2 / SW3 → C12 / C13 / C14',17)+txt(782,576,'Otro terminal de cada SW → GND · solo uno ON',17,'#baa2d9')
 s+=wire(695,536,760,536)
 s+=box(35,635,660,195)+txt(55,672,'ESP32-C3 Super Mini',26)
 s+=txt(55,713,'S0 / S1 / S2 / S3 → GPIO '+ ' / '.join(map(str,select)),20)

@@ -36,3 +36,10 @@ sentido de motores y ajuste PD en pista. Compilar no acredita rendimiento físic
 
 La v0.1 con ESP32 WROOM y lecturas directas está en el historial Git; su validación
 y pinout ya no corresponden al firmware actual.
+
+## Selector DIP elegido
+
+El 13/10 se concretó el selector como DIP de tres vías. Mismo circuito de
+C12/C13/C14 y mismo decodificador: exactamente un canal LOW selecciona 1/2/3.
+Se actualizaron conexiones, BOM y diagramas; solo comentarios del firmware
+cambiaron, sin modificar su comportamiento ni el pinout compilado.

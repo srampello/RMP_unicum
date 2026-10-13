@@ -1,4 +1,4 @@
-/* UNICUM v0.2: C3 Super Mini + 74HC4067 + QRE12 + MicroStart + selector 1P3T.
+/* UNICUM v0.2: C3 Super Mini + 74HC4067 + QRE12 + MicroStart + DIP de tres vias.
  * USB CDC On Boot enabled. S2/S3 en GPIO20/21 NO son UART en esta aplicación.
  * Control en tarea separada del servidor Wi-Fi; leer docs antes de conectar.
  */

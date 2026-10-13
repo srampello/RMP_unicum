@@ -44,16 +44,33 @@ Orden mirando hacia el avance. Centro de posición=5500. Solo SIG ocupa ADC.
 
 ## Selector de estrategias
 
-Propuesta: **selector rotativo de un polo / tres posiciones (1P3T)**.
-COM del selector a GND; cada contacto a C12, C13 o C14. Cada uno de esos canales
-lleva pull-up propio de 10 kΩ a 3V3. La posición elegida queda cerca de 0 V y las
-otras cerca de 3,3 V. **No conectar COM a la batería ni a 5 V.**
+Se usa **DIP switch de tres vías**, como el mostrado: tres interruptores SPST
+independientes, seis terminales. No tiene un COM interno compartido.
 
-Firmware: elegido <500 ADC, no elegidos ≥2500. Entre rangos, ninguno elegido o
-más de uno LOW = inválido. Estabilidad 50 ms; muestreo de selector cada 25 ms.
-Cambiar solo detenido. En marcha se conserva el perfil capturado al START.
-Un DIP puede reemplazarlo con tres interruptores, pero se debe activar exactamente
-uno. Un selector de dos bits necesitaría cambiar el decodificador.
+| Interruptor | Un terminal | Otro terminal | Pull-up |
+| --- | --- | --- | --- |
+| SW1 | C12 del MUX | GND | 10 kΩ de C12 a 3V3 |
+| SW2 | C13 del MUX | GND | 10 kΩ de C13 a 3V3 |
+| SW3 | C14 del MUX | GND | 10 kΩ de C14 a 3V3 |
+
+Se pueden unir externamente los tres terminales destinados a GND. Identificar
+cada pareja por continuidad: ON cierra esa pareja, OFF la abre. No asumir la
+numeración de patas ni que cualquier fila sea común sin comprobar el encapsulado.
+No conectar el DIP a 5 V ni a la batería. **ON se lee LOW** por el pull-up.
+
+| SW1 | SW2 | SW3 | Selección para START |
+| --- | --- | --- | --- |
+| ON | OFF | OFF | Velocidad 1 / baja |
+| OFF | ON | OFF | Velocidad 2 / media |
+| OFF | OFF | ON | Velocidad 3 / alta |
+| OFF | OFF | OFF | Inválida; bloquea arranque |
+| Dos o tres ON | | | Inválida; bloquea arranque |
+
+Activar exactamente uno antes de largar con MicroStart. Cambiar solo detenido;
+en marcha se conserva el perfil capturado al START. Firmware: elegido <500 ADC,
+no elegidos ≥2500; rangos intermedios son inválidos. Estabilidad 50 ms, lectura
+cada 25 ms. Los sensores siguen usando C0..C11: el DIP ocupa solo C12..C14 y no
+consume GPIO adicionales del C3. El decodificador existente ya acepta este DIP.
 
 ## TB6612FNG
 
