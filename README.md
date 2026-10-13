@@ -1,85 +1,96 @@
-# RMP UNICUM
+# RMP UNICUM · v0.2
 
-Seguidor de línea de **RMP Robotics** con ESP32 clásico WROOM/ESP32S,
-TB6612FNG, tres botones y doce QRE1113GR analógicos conectados directamente.
-Base de diseño y firmware v0.1 para poner en marcha y ajustar en pista.
+Seguidor de línea de **RMP Robotics**: **ESP32-C3 Super Mini**, barra de **12
+QRE1113GR**, **74HC4067**, **TB6612FNG**, dos **N20 6 V / 2000 RPM**, selector
+físico de tres estrategias y arranque/parada por **MicroStart JSumo**.
 
-## Hardware previsto
+**Esta versión reemplaza el mapa WROOM con entradas directas. No reutilizar su
+cableado.** La versión anterior queda en el historial de Git.
 
-- Placa de desarrollo ESP32-WROOM/ESP32S, Wi-Fi y Bluetooth 4.2.
-- Barra propia de 12 QRE1113GR, principio analógico de QTR-8A, sin MUX.
-- Driver TB6612FNG; canal A izquierdo, canal B derecho.
-- 3 botones: selección/arranque de estrategias, calibración y configuración.
-- **Motores Pololu de 6 V y batería LiPo 2S**, confirmados para este proyecto.
-  Falta modelo/relación de reducción y corriente de bloqueo de los motores.
+## Arquitectura
 
-> **Limitación que determina el proyecto:** el ESP32 WROOM expone seis entradas
-> ADC1 útiles para esta placa y las otras seis deben usar ADC2. ADC2 no está
-> disponible con Wi-Fi activo. El firmware utiliza Wi-Fi exclusivamente para
-> configurar detenido y lo apaga antes de calibrar, leer la barra o arrancar.
-> No hay telemetría de 12 sensores por Wi-Fi durante la marcha con este hardware.
-> Bluetooth Classic SPP queda disponible para comandos, sin streaming de carrera.
+| Elemento | Solución |
+| --- | --- |
+| Sensores | S01..S12, izquierda a derecha, a C0..C11 del 74HC4067 |
+| Lectura | SIG del MUX a GPIO0 / ADC1 del ESP32-C3 |
+| Selector | Rotativo 1P3T; contactos a C12/C13/C14, común a GND |
+| Driver | TB6612: A=izquierdo, B=derecho, dirección + PWM por motor |
+| Arranque/parada | MicroStart a GPIO3 y a STBY; alimentado a 3,3 V |
+| Wi-Fi | Permanece activo; lectura de los 12 sensores por ADC1 |
+| Alimentación | Se mantiene LiPo 2S; propuesta de 6 V regulados para motores y 5 V para placa/LED |
+
+El MUX y los pull-ups de receptores trabajan a **3,3 V**. Los emisores IR usan
+5 V con una resistencia por LED. No llevar 5 V a SIG ni GPIO3. El MicroStart
+**inicia la marcha**, no conmuta la alimentación general del robot.
 
 ## Documentación
 
 | Archivo | Contenido |
 | --- | --- |
-| [Distribución de pines](docs/PINOUT.md) | 12 ADC, TB6612FNG, botones y conector de barra |
-| [Electrónica y barra](docs/HARDWARE.md) | Circuito por sensor, alimentación, motor y criterios PCB |
-| [Puesta en marcha](docs/PUESTA_EN_MARCHA.md) | Arduino IDE, pruebas, calibración, botones y Wi-Fi |
-| [Firmware y control](docs/FIRMWARE.md) | PD, estrategias, polaridad y pérdida de línea |
-| [Diagrama de conexiones](hardware/conexiones.svg) | Plano lógico de conexiones; no es un PCB |
-| [Circuito del sensor](hardware/sensor_analogico.svg) | Celda QRE1113GR que se repite 12 veces |
-| [Lista de componentes](hardware/BOM.csv) | Componentes y cantidades iniciales |
-| [Fuentes](docs/REFERENCIAS.md) | Documentación original de fabricantes |
+| [PINOUT](docs/PINOUT.md) | GPIO, canales, selector y cableado del MicroStart |
+| [HARDWARE](docs/HARDWARE.md) | Sensores, niveles, alimentación y driver |
+| [PUESTA_EN_MARCHA](docs/PUESTA_EN_MARCHA.md) | Arduino, pruebas, calibración y START/STOP |
+| [FIRMWARE](docs/FIRMWARE.md) | Control PD, estados y servidor Wi-Fi |
+| [Conexiones](hardware/conexiones.svg) | Diagrama de la arquitectura actual |
+| [Celda QRE](hardware/sensor_analogico.svg) | Circuito repetido 12 veces |
+| [BOM](hardware/BOM.csv) | Lista de componentes inicial |
+| [VALIDACION](docs/VALIDACION.md) | Comprobaciones reales y pruebas pendientes |
+| [REFERENCIAS](docs/REFERENCIAS.md) | Documentación original de fabricantes |
 
 ## Firmware
 
 | Sketch | Uso |
 | --- | --- |
-| [RMP_UNICUM_SENSORES](firmware/pruebas/RMP_UNICUM_SENSORES/RMP_UNICUM_SENSORES.ino) | 12 lecturas crudas a 115200 baud; motores desactivados |
-| [RMP_UNICUM_MOTORES](firmware/pruebas/RMP_UNICUM_MOTORES/RMP_UNICUM_MOTORES.ino) | Probar dirección/PWM con ruedas levantadas |
-| [RMP_UNICUM](firmware/UNiCUM/RMP_UNICUM/RMP_UNICUM.ino) | Calibración, tres estrategias, PD y configuración inalámbrica |
+| [RMP_UNICUM_SENSORES](firmware/pruebas/RMP_UNICUM_SENSORES/RMP_UNICUM_SENSORES.ino) | Lecturas QRE, selector y MicroStart con AP Wi-Fi activo; motores quietos |
+| [RMP_UNICUM_MOTORES](firmware/pruebas/RMP_UNICUM_MOTORES/RMP_UNICUM_MOTORES.ino) | Prueba USB por motor, ruedas levantadas, con habilitación MicroStart |
+| [RMP_UNICUM](firmware/UNiCUM/RMP_UNICUM/RMP_UNICUM.ino) | Seguidor PD, estrategias, calibración NVS y telemetría web |
 
-Cada `.ino` está dentro de una carpeta con exactamente su mismo nombre.
-Usar Arduino-ESP32 **3.x**, placa **ESP32 Dev Module**, flash 4 MB si corresponde
-a la placa real, partición **Huge APP (3 MB No OTA/1 MB SPIFFS)**.
-USB/serial: **115200 baud**. Línea blanca sobre fondo negro por defecto.
+Arduino-ESP32 **3.x**, placa **ESP32C3 Dev Module**, **USB CDC On Boot: Enabled**,
+flash según placa (4 MB habitual), partición Default. Monitor **115200 baud**.
+Cada `.ino` está en una carpeta con su mismo nombre y sus headers.
 
-STBY se habilita por jumper/interruptor a 3V3, con pull-down de 10 kΩ a GND.
-La parada por software actúa sobre PWM. Abrir STBY deshabilita físicamente el driver.
+USB CDC es obligatorio: GPIO20/21 se usan para S2/S3 del MUX, no para UART0.
+El C3 dispone de Bluetooth LE, pero **esta versión implementa Wi-Fi y USB**,
+no Bluetooth Classic/SPP ni un servicio BLE.
 
-## Botones
+## Uso
 
-| Botón | GPIO | Pulsación corta detenido | Pulsación larga detenido |
-| --- | --- | --- | --- |
-| B1 | 5 | Estrategia 1 + arranque en 3 s | Calibración manual de 8 s |
-| B2 | 15 | Estrategia 2 + arranque en 3 s | Wi-Fi de configuración |
-| B3 | 23 | Estrategia 3 + arranque en 3 s | Salir de Wi-Fi / detener |
+1. Probar sensores, selector y MicroStart; luego dirección de motores.
+2. MicroStart en STOP. Mantener BOOT 1,2 s o pulsar “Calibrar 8 s” en la web.
+   Mover manualmente toda la barra sobre blanco y negro. Línea blanca por defecto.
+3. Selector en estrategia 1. Con calibración válida, el robot se arma automáticamente
+   al encender o completar calibración, mientras MicroStart esté LOW.
+4. Colocar barra sobre línea y enviar START al MicroStart. No se fuerza la marcha
+   desde la web. Arranque sin demora adicional por defecto.
+5. STOP del MicroStart deshabilita STBY por hardware y detiene por software.
+   BOOT o web/USB también pueden detener; después hay que rearmar con MicroStart LOW.
 
-Cualquier botón durante marcha, cuenta atrás o calibración cancela y detiene.
-El arranque exige calibración válida de los 12 canales y línea presente.
-Las velocidades y ganancias incluidas son **semillas de prueba**, pendientes de
-ajuste al conjunto motor, rueda, batería, altura de barra y pista.
+Wi-Fi: **RMP_UNICUM**, clave inicial **Unicum2026**, **http://192.168.4.1**.
+La interfaz muestra 12 barras 0..1000, valores ADC, selector, MicroStart y PWM.
+Color de línea elegido = barra alta. Permite editar perfiles solo detenido con
+MicroStart en STOP; elegir el perfil para carrera con el selector físico.
 
-## Alcance v0.1
+## Alcance
 
-Incluye diseño eléctrico lógico, conexiones, lista de componentes, firmware y
-pruebas. No incluye archivos de fabricación ni PCB ruteado. Antes de fijar un PCB
-hay que comprobar la placa ESP32 exacta, los motores y las dimensiones del chasis.
-No hay encoders, turbina, identificación de cruces ni detección automática de meta.
+Diseño lógico, pinout, firmware, pruebas y diagramas; **PCB todavía no ruteado**.
+Sin encoders, turbina, detección de meta ni lectura de batería/corriente.
+Los perfiles son puntos de partida: ajustar en pista. Faltan corriente de bloqueo
+real del N20, dimensiones de ruedas/chasis, capacidad de batería y validación física.
 
-## Verificación reproducible
+## Comprobaciones
 
 ```bash
+python3 tools/sync_headers.py
 python3 tests/check_project.py
 g++ -std=c++11 -Wall -Wextra -Werror tests/test_line_math.cpp -o /tmp/unicum_line_math
 /tmp/unicum_line_math
-arduino-cli compile --fqbn esp32:esp32:esp32:PartitionScheme=huge_app firmware/UNiCUM/RMP_UNICUM
-arduino-cli compile --fqbn esp32:esp32:esp32 firmware/pruebas/RMP_UNICUM_SENSORES
-arduino-cli compile --fqbn esp32:esp32:esp32 firmware/pruebas/RMP_UNICUM_MOTORES
+g++ -std=c++11 -Wall -Wextra -Werror tests/test_start_gate.cpp -o /tmp/unicum_start_gate
+/tmp/unicum_start_gate
+arduino-cli compile --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc firmware/UNiCUM/RMP_UNICUM
+arduino-cli compile --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc firmware/pruebas/RMP_UNICUM_SENSORES
+arduino-cli compile --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc firmware/pruebas/RMP_UNICUM_MOTORES
 ```
 
-Si se modifica `Config.h` o `Hardware.h` del sketch principal, ejecutar
-`python3 tools/sync_headers.py` antes de compilar las pruebas. Ver
-[VALIDACION.md](docs/VALIDACION.md) para el resultado real de la versión inicial.
+Cambios de hardware: editar `Config.h` y `Hardware.h` del principal, luego ejecutar
+`tools/sync_headers.py`. La calibración usa namespace NVS `unicum-c3-v2` para no
+reutilizar accidentalmente la de la arquitectura anterior.

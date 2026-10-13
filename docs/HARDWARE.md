@@ -13,8 +13,8 @@ y orientación del encapsulado en el datasheet; no deducir el pin 1 por una foto
 | +3V3_SENS | Resistencia de 47 kΩ, una por receptor |
 | Extremo de resistencia 47 kΩ | QRE pin 3, colector: nodo OUT |
 | QRE pin 4, emisor | GND |
-| OUT | Resistencia serie de 100 Ω hacia señal Sxx/ADC |
-| Sxx | Capacitor opcional 1 nF a GND, junto a entrada ADC |
+| OUT | Resistencia serie de 100 Ω hacia señal Sxx/Cxx del MUX |
+| Sxx | Capacitor opcional 1 nF a GND, antes del MUX, por sensor |
 
 ![Celda analógica](../hardware/sensor_analogico.svg)
 
@@ -32,7 +32,7 @@ resistencias. No poner varios LED en paralelo compartiendo una sola resistencia.
 Mayor reflexión en blanco → más conducción → OUT baja; negro → OUT alta.
 El pull-up a 3,3 V limita la salida a la lógica del ESP32. **No llevar el pull-up
 a 5 V** aunque el LED use 5 V. ADC a 12 bits y atenuación 11 dB: la escala de
-conversión del ESP32 clásico puede saturar antes de 3,3 V (~3,1 V), por lo que
+conversión del ESP32-C3 puede saturar antes de 3,3 V (~2,5 V), por lo que
 4095 no implica medir con precisión 3,3 V. Para seguimiento se calibra cada canal.
 
 47 kΩ es valor inicial inspirado en QTR-8A; validar contraste/ruido con QRE,
@@ -54,54 +54,71 @@ no instalar 100 nF en cada señal sin estudiar la respuesta temporal.
 
 No se fijó geometría de fabricación: faltan dimensiones de ruedas/chasis y placa.
 
-## Batería LiPo 2S y motores Pololu 6 V
+## MUX, selector y MicroStart
 
-Una 2S convencional tiene **7,4 V nominal y 8,4 V cargada**. No es un rail de 6 V.
-Base propuesta: batería → protección/fusible e interruptor → regulador **6 V
-para VM** y regulador **5 V para la placa ESP32 y emisores**. La salida 3V3 de la
-placa alimenta receptores y VCC del TB6612, de consumo pequeño.
+74HC4067 alimentado a **3,3 V**, EN a GND, C0..C11 a los doce OUT, C12..C14 al
+selector y C15 a GND. SIG a ADC1 GPIO0 del C3. Usar 74HC, no alimentar 74HC a 5 V
+suponiendo que una salida GPIO3V3 satisface sus umbrales. Pull-ups de receptores
+siempre a 3V3. Desacoplar VCC del MUX con 100 nF junto al chip/módulo.
 
-Elegir corriente del regulador de motores por los dos motores y sus arranques,
-incluida capacidad ante transitorios/regeneración y disipación. **Falta el modelo
-Pololu exacto**: muchos HP pueden superar la capacidad del TB6612 al bloquearse.
-No dar por compatible el driver únicamente porque el motor sea de 6 V.
+Añadir pull-ups de 10 kΩ en GPIO2 y GPIO8 (S0/S1) para strapping, y de 10 kΩ en
+C12/C13/C14 para selector. El selector 1P3T conecta exactamente uno a GND. Sin
+contacto o con dos contactos seleccionados, inicio bloqueado.
 
-Como diseño base, no alimentar esos motores directamente a 8,4 V confiando en
-un límite de PWM: reduce tensión media pero los pulsos siguen siendo de 8,4 V.
-No hay medida de corriente ni undervoltage LiPo por firmware; usar protección/
-alarma externa adecuada. La energía de frenado vuelve al rail VM; elegir etapa
-de alimentación que la tolere, desacoplar y medir picos bajo carga.
+MicroStart alimentado a 3V3, compatible según JSumo. SIGNAL va a GPIO3 y a STBY
+por interruptor de habilitación; STBY con 10 kΩ a GND. Con STOP (LOW), driver en
+standby por hardware. Con START (HIGH), driver habilitado, pero PWM solo se activa
+tras validación/START del firmware. Verificar nivel/polaridad en módulo real.
+No conectar salida a 5 V directamente al ESP32. No conectar SIGNAL a batería.
+
+## Batería 2S y motores N20 6 V / 2000 RPM
+
+Se mantiene la batería LiPo 2S elegida: 7,4 V nominal, **8,4 V cargada**. Rail
+propuesto **6 V regulados para VM**, y otro **5 V para Super Mini y emisores**.
+3V3 de la placa alimenta MUX, receptores, MicroStart y TB6612 VCC. No alimentar
+motores ni LED de barra desde el regulador 3V3 del C3.
+
+N20 6 V / 2000 RPM no indica corriente de bloqueo, fabricante ni consumo real:
+esos valores faltan para dimensionar regulador, fusible y validar TB6612. RPM es
+valor nominal sin carga; no determina velocidad del robot sin diámetro de ruedas.
+No asumir que limitando PWM se convierte una batería 8,4 V en fuente de 6 V: los
+pulsos siguen siendo de 8,4 V. Elegir regulador que tolere transitorios/frenado;
+medir picos y tensión bajo carga. No hay protección LiPo por firmware.
 
 | Rail | Destino | Criterio |
 | --- | --- | --- |
-| LiPo 2S | Entrada reguladores | 8,4 V máxima, protección de batería |
-| 6 V regulados | TB6612 VM / motores | Dimensionar por corriente de motores y límites driver |
-| 5 V regulados | Pin 5V/VIN de **placa de desarrollo** y LED de barra | Propuesta 2 A con margen; verificar pin 5 V real |
-| 3,3 V | TB6612 VCC, receptores, botones | Nunca alimentar módulo WROOM desnudo a 5 V |
-| GND | Todo | Retornos motores separados de señales hasta punto común |
+| LiPo 2S | Reguladores por fusible/interruptor | 8,4 V máxima, protección externa |
+| 6 V | TB6612 VM, dos N20 | Corriente por motores/arranques y térmica del driver |
+| 5 V | Pin 5V de Super Mini y LED | Propuesta 2 A con margen; verificar placa |
+| 3,3 V | MUX, receptores, MicroStart, TB6612 VCC | Comprobar margen del regulador Super Mini |
+| GND | Todos los componentes | Retornos de motor separados hasta punto común |
 
-USB y alimentación externa: revisar circuito de la placa concreta antes de
-conectarlos simultáneamente. Si se usa módulo WROOM sin placa de desarrollo,
-se necesita regulador 3V3, EN/reset y circuito de programación propios.
+Revisar la Super Mini concreta antes de conectar USB y 5 V externo simultáneamente.
+No llevar LiPo directamente al pin 5V ni 3V3. El MicroStart no es interruptor de
+alimentación; el robot queda alimentado y espera su señal.
 
-## Driver, ruido y componentes auxiliares
+## TB6612, reset y ruido
 
-TB6612 VCC=3,3 V; VM=6 V en la propuesta. Rango recomendado VM=2,5..13,5 V,
-VCC=2,7..5,5 V. No confundir máximo absoluto con condición continua de diseño:
-el datasheet actual especifica 1,0 A en rango operativo sin PWM con VM≥4,5 V;
-1,2 A figura en máximos absolutos y 3,2 A es pico de un único pulso de 10 ms.
-Evaluar térmica y corriente real del módulo, sin usar el pico como corriente de trabajo.
+TB6612 VCC=3,3 V, VM=6 V. Rango recomendado VM 2,5..13,5 V y VCC 2,7..5,5 V.
+Datasheet actual: 1 A en rango operativo sin PWM a VM≥4,5 V; 1,2 A figura como
+máximo absoluto, 3,2 A es pico de un único pulso de 10 ms. Dimensionar por térmica
+real, corriente de motores y módulo; no usar el pico como corriente de trabajo.
 
-- Junto al TB6612: 100 nF cerámico + 10 µF en VCC; 100 nF + 10 µF en VM
-  según aplicación del fabricante. Agregar 470 µF en VM como reserva inicial,
-  tensión ≥16 V; dimensionar según transitorios reales.
-- Barra: 100 nF + 10 µF en cada rail (5 V y 3V3), cerca del conector.
-- Motores: 100 nF cerámico entre bornes como punto inicial, cables cortos/trenzados.
-- PWMA/PWMB: pull-down de 10 kΩ a GND; STBY: pull-down de 10 kΩ y
-  jumper/interruptor a 3V3. Abrirlo deshabilita el driver independientemente de software.
-- Botones: un pull-up de 10 kΩ a 3V3 cada uno; GPIO5/15 sueltos al reset.
-- Motor driver ya tiene caminos de recirculación. No poner un diodo único en
-  paralelo con un motor que se va a invertir mediante puente H.
+- PWMA/PWMB (GPIO1/10) con 10 kΩ a GND. AIN1/2 y BIN1/2 también con 10 kΩ
+  a GND. Los pines UART GPIO20/21 se destinan a S2/S3 del MUX, por lo que mensajes
+  ROM no pulsan PWM. Usar USB CDC para evitar que UART interfiera con selección
+  de canales. Mantener MicroStart STOP y STBY abierto al cargar/reiniciar.
+- STBY con 10 kΩ a GND y SIGNAL a través de interruptor. Retirar un puente a VCC
+  si el breakout lo trae. MicroStart LOW → alta impedancia; PWM cero con STBY HIGH
+  → frenado activo. Son comportamientos diferentes.
+- Junto a driver: 100 nF + 10 µF en VM y VCC; reserva inicial 470 µF ≥16 V en VM.
+  Descontar capacitores ya presentes en breakout y dimensionar transitorios reales.
+- Barra: 100 nF + 10 µF por rail. Motores: 100 nF entre bornes, cables cortos/trenzados.
+- No añadir un diodo único paralelo a cada motor reversible: puente H ya tiene
+  caminos de recirculación. Mantener potencia/ruido lejos de señales ADC.
+- Evitar capacitores grandes en SIG común que retengan la tensión del canal anterior.
+  Capacitores opcionales 1 nF son **por sensor, antes del MUX**. No instalar 100 nF
+  en SIG sin recalcular asentamiento/frecuencia. 120 µs es valor inicial a validar.
 
-La lista [BOM](../hardware/BOM.csv) es para este diseño lógico. Si se compra
-breakout TB6612, descontar los capacitores que ya incluya y verificar su esquema.
+PCB aún no ruteado. Confirmar dimensiones, placa Super Mini, consumo de N20 y
+altura de barra antes de diseñar archivos de fabricación.

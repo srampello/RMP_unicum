@@ -28,17 +28,32 @@ private:
   }
 };
 
+inline void selectMux(uint8_t channel) {
+  for(uint8_t bit=0;bit<4;bit++) digitalWrite(Unicum::MUX_SELECT_PINS[bit],(channel>>bit)&1);
+}
 inline void beginSensors() {
-  analogReadResolution(12);
-  for(uint8_t p:Unicum::SENSOR_PINS) { pinMode(p,INPUT); analogSetPinAttenuation(p,ADC_11db); }
+  for(uint8_t p:Unicum::MUX_SELECT_PINS) { pinMode(p,OUTPUT); digitalWrite(p,LOW); }
+  analogReadResolution(12); pinMode(Unicum::MUX_SIG,INPUT);
+  analogSetPinAttenuation(Unicum::MUX_SIG,ADC_11db);
+}
+inline uint16_t readMux(uint8_t channel) {
+  selectMux(channel); delayMicroseconds(Unicum::MUX_SETTLE_US);
+  analogRead(Unicum::MUX_SIG);
+  uint32_t sum=0;
+  for(uint8_t i=0;i<Unicum::ADC_SAMPLES;i++) sum+=analogRead(Unicum::MUX_SIG);
+  return sum/Unicum::ADC_SAMPLES;
 }
 inline void readSensors(uint16_t* raw) {
-  for(uint8_t i=0;i<Unicum::SENSOR_COUNT;i++) {
-    analogRead(Unicum::SENSOR_PINS[i]); // Descartar primera conversión tras cambio de canal.
-    uint32_t sum=0;
-    for(uint8_t s=0;s<Unicum::ADC_SAMPLES;s++) sum+=analogRead(Unicum::SENSOR_PINS[i]);
-    raw[i]=sum/Unicum::ADC_SAMPLES;
+  for(uint8_t i=0;i<Unicum::SENSOR_COUNT;i++) raw[i]=readMux(Unicum::SENSOR_CHANNELS[i]);
+}
+inline int readStrategy(uint16_t* values) {
+  int selected=-1;
+  for(uint8_t i=0;i<3;i++) values[i]=readMux(Unicum::STRATEGY_CHANNELS[i]);
+  for(uint8_t i=0;i<3;i++) {
+    if(values[i]<Unicum::SELECTOR_LOW) { if(selected!=-1) return -1; selected=i; }
+    else if(values[i]<Unicum::SELECTOR_HIGH) return -1;
   }
+  return selected;
 }
 
 class Button {

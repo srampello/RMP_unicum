@@ -1,274 +1,296 @@
-/* RMP UNICUM | ESP32 clásico WROOM | Arduino-ESP32 3.x
- * 12 entradas analógicas directas. Wi-Fi solo detenido, sin leer ADC2.
- * Leer docs/PUESTA_EN_MARCHA.md antes de energizar motores.
+/* UNICUM v0.2: C3 Super Mini + 74HC4067 + QRE12 + MicroStart + selector 1P3T.
+ * USB CDC On Boot enabled. S2/S3 en GPIO20/21 NO son UART en esta aplicación.
+ * Control en tarea separada del servidor Wi-Fi; leer docs antes de conectar.
  */
 #include <WiFi.h>
 #include <WebServer.h>
-#include <BluetoothSerial.h>
 #include <Preferences.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/queue.h>
+#include <math.h>
 #include "Hardware.h"
 #include "LineMath.h"
+#include "StartGate.h"
 #include "WebPage.h"
-#include <math.h>
 
-enum class Mode { STOPPED, CALIBRATING, COUNTDOWN, RUNNING, WIFI_SETUP };
-Motors motors;
-Button buttons[3];
-BluetoothSerial bt;
+enum class Mode:uint8_t { STOPPED, ARMED, CALIBRATING, COUNTDOWN, RUNNING };
+enum class Action:uint8_t { ARM, STOP, CAL, COLOR, PROFILE };
+struct Command { Action action; int index=0,base=0,straight=0,maxPwm=0; float kp=0,kd=0; bool white=true; };
+struct Profile { int base,straight,maxPwm; float kp,kd; };
+struct Snapshot {
+  Mode mode=Mode::STOPPED;
+  bool calibrated=false,microHigh=false,motorReady=false,white=true;
+  int selector=-1,active=0,left=0,right=0;
+  uint16_t raw[12]={},signal[12]={},low[12]={},high[12]={},switchRaw[3]={},position=5500;
+  Profile profiles[3]={};
+  uint32_t cycleUs=0,overruns=0;
+  const char* reason="Iniciando";
+};
+Snapshot published;
+portMUX_TYPE snapshotLock=portMUX_INITIALIZER_UNLOCKED;
+QueueHandle_t commandQueue=nullptr;
 WebServer server(80);
+Motors motors;
 Preferences storage;
-Mode mode=Mode::STOPPED;
-uint16_t raw[12]={}, lowCal[12]={}, highCal[12]={}, signalValues[12]={};
-uint16_t linePosition=5500;
-bool calibrated=false, whiteLine=Unicum::DEFAULT_WHITE_LINE, motorReady=false;
-bool nvsReady=false, btReady=false;
-uint8_t strategyIndex=0;
-Unicum::Strategy strategies[3];
-struct SavedProfile { int base, straight, maxPwm; float kp, kd; };
+Button button;
+StartGate startGate;
+Snapshot state; // Solo la tarea de control modifica estado, ADC, motores y NVS.
+bool nvsReady=false,autoArm=true;
+uint32_t stateSince=0,lastSeen=0,lastSelector=0,selectorSince=0;
+int selectorCandidate=-1;
+float previousError=0,filteredDerivative=0,baseNow=0;
+String serialBuffer;
+
+const char* modeName(Mode mode) {
+  switch(mode) {
+    case Mode::ARMED:return "ARMADO";
+    case Mode::CALIBRATING:return "CALIBRANDO";
+    case Mode::COUNTDOWN:return "ESPERA_START";
+    case Mode::RUNNING:return "MARCHA";
+    default:return "DETENIDO";
+  }
+}
+Snapshot getSnapshot() {
+  portENTER_CRITICAL(&snapshotLock); Snapshot copy=published; portEXIT_CRITICAL(&snapshotLock); return copy;
+}
+void publish() {
+  state.left=motors.left; state.right=motors.right;
+  portENTER_CRITICAL(&snapshotLock); published=state; portEXIT_CRITICAL(&snapshotLock);
+}
+void halt(const char* reason,bool rearm=false) {
+  motors.stop(); state.mode=Mode::STOPPED; state.reason=reason;
+  autoArm=rearm; baseNow=0;
+}
+bool motionMode() { return state.mode==Mode::RUNNING || state.mode==Mode::COUNTDOWN; }
+bool editable() { return !motionMode() && state.mode!=Mode::CALIBRATING && !state.microHigh; }
+void arm() {
+  if(!editable() || !state.calibrated || !state.motorReady || state.selector<0) {
+    state.reason="Para armar: MicroStart LOW, calibracion valida y selector estable"; return;
+  }
+  motors.stop(); state.mode=Mode::ARMED; state.reason="Esperando START del MicroStart"; autoArm=false;
+}
+void calibrate(uint32_t now) {
+  if(state.microHigh || motionMode()) { state.reason="Calibrar con MicroStart STOP y robot detenido"; return; }
+  halt("Mover barra sobre blanco y negro durante 8 s"); state.calibrated=false;
+  if(nvsReady)storage.putBool("valid",false);
+  for(uint8_t i=0;i<12;i++) { state.low[i]=4095; state.high[i]=0; }
+  state.mode=Mode::CALIBRATING; stateSince=now;
+}
 void saveProfiles() {
   if(!nvsReady) return;
-  SavedProfile saved[3];
-  for(uint8_t i=0;i<3;i++) {
-    const auto& p=strategies[i]; saved[i]={p.base,p.straight,p.maxPwm,p.kp,p.kd};
-  }
-  storage.putBytes("profiles",saved,sizeof(saved));
+  storage.putBytes("profiles",state.profiles,sizeof(state.profiles)); storage.putBool("white",state.white);
 }
-uint32_t stateSince=0, lastTick=0, lastSeen=0, lastLog=0;
-uint32_t cycleUs=0, overruns=0;
-float previousError=0, derivativeFiltered=0, baseNow=0;
-bool pendingStart=false, pendingExitWifi=false;
-String serialBuffer, btBuffer;
-
-const char* modeName() {
-  switch(mode) {
-    case Mode::CALIBRATING: return "CALIBRANDO";
-    case Mode::COUNTDOWN: return "CUENTA_ATRAS";
-    case Mode::RUNNING: return "MARCHA";
-    case Mode::WIFI_SETUP: return "WIFI_CONFIG";
-    default: return "DETENIDO";
+void execute(const Command& cmd,uint32_t now) {
+  switch(cmd.action) {
+    case Action::STOP:halt("Parada local/Web/USB; volver a armar para recibir START");break;
+    case Action::ARM:arm();break;
+    case Action::CAL:calibrate(now);break;
+    case Action::COLOR:
+      if(editable()) { state.white=cmd.white; saveProfiles(); state.reason="Polaridad guardada"; }
+      else state.reason="Configuracion rechazada: detener MicroStart";
+      break;
+    case Action::PROFILE:
+      if(editable() && cmd.index>=0 && cmd.index<3) {
+        state.profiles[cmd.index]={cmd.base,cmd.straight,cmd.maxPwm,cmd.kp,cmd.kd};
+        state.white=cmd.white; saveProfiles(); state.reason="Perfil guardado; seleccion por switch fisico";
+      } else state.reason="Configuracion rechazada: detener MicroStart";
+      break;
   }
 }
-void stopRobot() { motors.stop(); mode=Mode::STOPPED; baseNow=0; pendingStart=false; }
-void exitWifi() {
-  server.stop(); WiFi.softAPdisconnect(true); WiFi.mode(WIFI_OFF);
-  // Esperar liberación del ADC2 con motores detenidos, fuera del lazo de control.
-  delay(50); mode=Mode::STOPPED;
+void updateSelector(uint32_t now) {
+  if(now-lastSelector<25) return;
+  lastSelector=now;
+  int candidate=readStrategy(state.switchRaw);
+  if(candidate!=selectorCandidate) { selectorCandidate=candidate; selectorSince=now; state.selector=-1; }
+  if(candidate<0) state.selector=-1;
+  else if(now-selectorSince>=50) state.selector=candidate;
 }
-void saveCalibration() {
-  if(!nvsReady) return;
-  storage.putBool("valid",false);
-  storage.putBytes("low",lowCal,sizeof(lowCal)); storage.putBytes("high",highCal,sizeof(highCal));
-  storage.putBool("valid",true);
-}
-void beginCalibration() {
-  motors.stop();
-  if(mode==Mode::WIFI_SETUP) exitWifi();
-  calibrated=false;
-  for(uint8_t i=0;i<12;i++) { lowCal[i]=4095; highCal[i]=0; }
-  mode=Mode::CALIBRATING; stateSince=millis();
-  Serial.println("Mover manualmente TODA la barra sobre blanco y negro durante 8 s.");
-}
-void startRobot() {
-  if(!motorReady || !calibrated || mode==Mode::CALIBRATING) {
-    Serial.println("Inicio rechazado: calibrar 12 sensores y comprobar PWM."); return;
-  }
-  motors.stop();
-  if(mode==Mode::WIFI_SETUP) exitWifi();
-  mode=Mode::COUNTDOWN; stateSince=millis();
-  previousError=derivativeFiltered=baseNow=0;
-  Serial.println("Inicio en 3 segundos. Wi-Fi apagado.");
-}
-String statusJson() {
-  String s="{\"mode\":\""; s+=modeName();
-  s+="\",\"calibrated\":"; s+=calibrated ? "true":"false";
-  s+=",\"strategy\":"; s+=strategyIndex+1;
-  s+=",\"white\":"; s+=whiteLine ? "true":"false";
-  s+=",\"motorReady\":"; s+=motorReady ? "true":"false";
-  s+=",\"position\":"; s+=linePosition;
-  s+=",\"leftPwm\":"; s+=motors.left; s+=",\"rightPwm\":"; s+=motors.right;
-  s+=",\"cycleUs\":"; s+=cycleUs;
-  s+=",\"overruns\":"; s+=overruns;
-  s+=",\"sensorsAvailable\":"; s+=(mode==Mode::WIFI_SETUP) ? "false":"true";
-  s+=",\"strategies\":[";
-  for(uint8_t i=0;i<3;i++) {
-    if(i) s+=",";
-    const auto& p=strategies[i];
-    s+="{\"name\":\""; s+=p.name;
-    s+="\",\"base\":"; s+=p.base; s+=",\"straight\":"; s+=p.straight;
-    s+=",\"max\":"; s+=p.maxPwm; s+=",\"kp\":"; s+=String(p.kp,4);
-    s+=",\"kd\":"; s+=String(p.kd,4); s+="}";
-  }
-  s+="]}"; return s;
-}
-bool parseNumber(const String& s,float& v) {
-  if(!s.length()) return false;
-  char* end=nullptr; v=strtof(s.c_str(),&end);
-  return end!=s.c_str() && *end=='\0' && isfinite(v);
-}
-void enterWifi() {
-  if(mode==Mode::WIFI_SETUP) return;
-  stopRobot(); mode=Mode::WIFI_SETUP; // Detiene lectura antes de activar radio.
-  WiFi.mode(WIFI_AP);
-  if(!WiFi.softAP(Unicum::AP_SSID,Unicum::AP_PASSWORD)) {
-    WiFi.mode(WIFI_OFF); mode=Mode::STOPPED; Serial.println("Error creando AP"); return;
-  }
-  server.begin(); Serial.print("Wi-Fi configuración: http://"); Serial.println(WiFi.softAPIP());
-}
-void setupWeb() {
-  server.on("/",HTTP_GET,[](){ server.send_P(200,"text/html; charset=utf-8",WEB_PAGE); });
-  server.on("/status",HTTP_GET,[](){ server.send(200,"application/json",statusJson()); });
-  server.on("/config",HTTP_POST,[](){
-    float idx,b,s,m,kp,kd;
-    if(!parseNumber(server.arg("strategy"),idx) || idx<1 || idx>3 || idx!=floorf(idx) ||
-       !parseNumber(server.arg("base"),b) || !parseNumber(server.arg("straight"),s) ||
-       !parseNumber(server.arg("max"),m) || !parseNumber(server.arg("kp"),kp) ||
-       !parseNumber(server.arg("kd"),kd) || b<0 || b>s || s>m || m>255 ||
-       kp<0 || kp>0.2f || kd<0 || kd>2 ||
-       (server.arg("white")!="0" && server.arg("white")!="1")) {
-      server.send(400,"text/plain","Valores invalidos. 0 <= base <= recta <= max <= 255."); return;
-    }
-    strategyIndex=(uint8_t)idx-1;
-    auto& p=strategies[strategyIndex]; p.base=(int)b; p.straight=(int)s; p.maxPwm=(int)m; p.kp=kp; p.kd=kd;
-    whiteLine=server.arg("white")=="1";
-    if(nvsReady) { saveProfiles(); storage.putBool("white",whiteLine); }
-    server.send(200,"text/plain","Guardado. Wi-Fi se apaga al iniciar.");
-  });
-  server.on("/start",HTTP_POST,[](){
-    if(!calibrated || !motorReady) { server.send(409,"text/plain","Calibrar primero por botones/USB/Bluetooth."); return; }
-    server.send(200,"text/plain","Inicio en 3 s. Se cerrara el Wi-Fi."); pendingStart=true;
-  });
-  server.on("/exit",HTTP_POST,[](){ server.send(200,"text/plain","Volviendo a sensores, detenido."); pendingExitWifi=true; });
-}
-void handleCommand(String cmd,Stream& out) {
-  cmd.trim(); cmd.toLowerCase();
-  if(cmd=="stop") { if(mode==Mode::WIFI_SETUP) exitWifi(); stopRobot(); out.println("Detenido"); }
-  else if(cmd=="cal") { beginCalibration(); out.println("Calibracion manual 8 s"); }
-  else if(cmd=="start") { startRobot(); out.println(modeName()); }
-  else if(cmd=="wifi") { enterWifi(); out.println("http://192.168.4.1 (sensores suspendidos)"); }
-  else if(cmd=="exit") { if(mode==Mode::WIFI_SETUP) exitWifi(); out.println(modeName()); }
-  else if(cmd=="1" || cmd=="2" || cmd=="3") {
-    if(mode==Mode::RUNNING || mode==Mode::COUNTDOWN) out.println("Detener antes de cambiar estrategia");
-    else { strategyIndex=cmd.toInt()-1; out.println(strategies[strategyIndex].name); }
-  }
-  else if(cmd=="white" || cmd=="black") {
-    if(mode==Mode::RUNNING || mode==Mode::COUNTDOWN) out.println("Detener primero");
-    else { whiteLine=cmd=="white"; if(nvsReady) storage.putBool("white",whiteLine); out.println("Polaridad guardada"); }
-  }
-  else if(cmd=="status") out.println(statusJson());
-  else if(cmd=="sensors") {
-    if(mode==Mode::WIFI_SETUP) out.println("No disponibles: ADC2 ocupado por Wi-Fi");
-    else if(mode==Mode::RUNNING || mode==Mode::COUNTDOWN) out.println("Detener para imprimir sensores");
-    else {
-      for(uint8_t i=0;i<12;i++) { out.printf("S%02u raw=%u linea=%u min=%u max=%u\n",i+1,raw[i],signalValues[i],lowCal[i],highCal[i]); }
-    }
-  }
-  else out.println("Comandos: cal start stop 1 2 3 white black wifi exit status sensors");
-}
-void readCommands(Stream& in,String& buffer) {
-  // Máximo 32 caracteres por iteración: evita monopolizar el control.
-  for(uint8_t i=0;i<32 && in.available();i++) {
-    char c=in.read();
-    if(c=='\n') { handleCommand(buffer,in); buffer=""; }
-    else if(c!='\r') { if(buffer.length()<80) buffer+=c; else buffer=""; }
-  }
-}
-void controlTick(uint32_t now) {
-  if(mode==Mode::WIFI_SETUP) return; // Nunca leer ADC2 con Wi-Fi activo.
-  uint32_t started=micros(); readSensors(raw);
-  if(mode==Mode::CALIBRATING) {
-    for(uint8_t i=0;i<12;i++) { lowCal[i]=min(lowCal[i],raw[i]); highCal[i]=max(highCal[i],raw[i]); }
+void controlStep() {
+  const uint32_t now=millis(),started=micros();
+  state.microHigh=digitalRead(Unicum::MICROSTART_PIN)==HIGH;
+  bool startEdge=startGate.update(now,state.microHigh);
+  // STOP no tiene antirrebote retardado; STBY además está conectado a SIGNAL.
+  if(!state.microHigh && motionMode()) halt("STOP MicroStart",true);
+  if(state.microHigh && state.mode==Mode::CALIBRATING) halt("Calibracion cancelada: MicroStart activo");
+  if(digitalRead(Unicum::CAL_BUTTON)==LOW && motionMode()) halt("Parada por BOOT");
+  uint8_t event=button.poll(now);
+  if(event==2) calibrate(now);
+  else if(event==1 && !state.microHigh) arm();
+  Command cmd;
+  for(uint8_t i=0;i<4 && xQueueReceive(commandQueue,&cmd,0)==pdTRUE;i++) execute(cmd,now);
+  readSensors(state.raw); updateSelector(now);
+  if(state.mode==Mode::CALIBRATING) {
+    for(uint8_t i=0;i<12;i++) { state.low[i]=min(state.low[i],state.raw[i]); state.high[i]=max(state.high[i],state.raw[i]); }
     if(now-stateSince>=Unicum::CAL_MS) {
-      calibrated=true;
-      for(uint8_t i=0;i<12;i++) {
-        if(highCal[i]-lowCal[i]<Unicum::MIN_CAL_SPAN) { calibrated=false; Serial.printf("S%u sin contraste suficiente\n",i+1); }
-      }
-      if(calibrated) saveCalibration();
-      mode=Mode::STOPPED; Serial.println(calibrated ? "Calibracion guardada":"Calibracion rechazada");
-    }
-  }
-  for(uint8_t i=0;i<12;i++) signalValues[i]=calibrated ? LineMath::normalized(raw[i],lowCal[i],highCal[i],whiteLine):0;
-  bool seen=calibrated && LineMath::position(signalValues,12,Unicum::LINE_THRESHOLD,linePosition);
-  if(mode==Mode::COUNTDOWN && now-stateSince>=Unicum::START_DELAY_MS) {
-    if(!seen) { stopRobot(); Serial.println("Inicio cancelado: colocar barra sobre la linea"); }
-    else { mode=Mode::RUNNING; stateSince=lastSeen=now; previousError=(int)linePosition-5500; }
-  }
-  if(mode==Mode::RUNNING) {
-    if(!seen) {
-      motors.stop(); baseNow=0; // Frenar inmediato; no buscar a ciegas.
-      if(now-lastSeen>=Unicum::LOST_MS) { stopRobot(); Serial.println("Detenido: linea perdida"); }
-    } else {
-      bool reacquired=now-lastSeen>20; lastSeen=now;
-      auto& p=strategies[strategyIndex];
-      float error=(int)linePosition-5500;
-      if(reacquired) { previousError=error; derivativeFiltered=0; }
-      float delta=error-previousError; previousError=error;
-      derivativeFiltered=0.7f*derivativeFiltered+0.3f*delta;
-      float correction=p.kp*error+p.kd*derivativeFiltered;
-      correction=constrain(correction,-(float)p.maxPwm,(float)p.maxPwm);
-      int target=abs((int)error)<400 && fabsf(delta)<100 ? p.straight:p.base;
-      baseNow=constrain((float)target,baseNow-2.0f,baseNow+0.8f);
-      // Error positivo = línea a derecha: acelerar izquierda / reducir derecha.
-      int l=constrain((int)(baseNow+correction),0,p.maxPwm);
-      int r=constrain((int)(baseNow-correction),0,p.maxPwm);
-      motors.set(l,r);
-    }
-  }
-  cycleUs=micros()-started;
-  if(cycleUs>Unicum::CONTROL_US) overruns++;
-}
-void setup() {
-  Serial.begin(115200);
-  motorReady=motors.begin();
-  WiFi.mode(WIFI_OFF); beginSensors();
-  for(uint8_t i=0;i<3;i++) { strategies[i]=Unicum::STRATEGIES[i]; buttons[i].begin(Unicum::BUTTON_PINS[i]); }
-  nvsReady=storage.begin("unicum-v1",false);
-  if(nvsReady) {
-    // No persistir punteros de nombres: cargar solo campos numéricos.
-    SavedProfile saved[3];
-    if(storage.getBytesLength("profiles")==sizeof(saved)) {
-      storage.getBytes("profiles",saved,sizeof(saved));
-      for(uint8_t i=0;i<3;i++) {
-        auto& s=saved[i];
-        if(s.base>=0 && s.base<=s.straight && s.straight<=s.maxPwm && s.maxPwm<=255 &&
-           isfinite(s.kp) && s.kp>=0 && s.kp<=0.2f && isfinite(s.kd) && s.kd>=0 && s.kd<=2) {
-          strategies[i].base=s.base; strategies[i].straight=s.straight; strategies[i].maxPwm=s.maxPwm;
-          strategies[i].kp=s.kp; strategies[i].kd=s.kd;
+      state.calibrated=true;
+      for(uint8_t i=0;i<12;i++) if(state.high[i]-state.low[i]<Unicum::MIN_CAL_SPAN) state.calibrated=false;
+      if(nvsReady) {
+        storage.putBool("valid",false);
+        if(state.calibrated) {
+          storage.putBytes("low",state.low,sizeof(state.low)); storage.putBytes("high",state.high,sizeof(state.high));
+          storage.putBool("valid",true);
         }
       }
-    }
-    whiteLine=storage.getBool("white",Unicum::DEFAULT_WHITE_LINE);
-    calibrated=storage.getBool("valid",false) && storage.getBytesLength("low")==sizeof(lowCal) && storage.getBytesLength("high")==sizeof(highCal);
-    if(calibrated) {
-      storage.getBytes("low",lowCal,sizeof(lowCal)); storage.getBytes("high",highCal,sizeof(highCal));
-      for(uint8_t i=0;i<12;i++) if(highCal[i]>4095 || lowCal[i]>=highCal[i] || highCal[i]-lowCal[i]<Unicum::MIN_CAL_SPAN) calibrated=false;
+      halt(state.calibrated ? "Calibracion guardada":"Calibracion rechazada: revisar rangos",state.calibrated);
     }
   }
-  if(Unicum::ENABLE_BLUETOOTH) btReady=bt.begin(Unicum::BT_NAME);
-  setupWeb();
-  Serial.println("RMP UNICUM v0.1 | detenido | 115200 baud | help para comandos");
-  if(!motorReady) Serial.println("Error PWM: inicio bloqueado");
+  for(uint8_t i=0;i<12;i++) state.signal[i]=state.calibrated ? LineMath::normalized(state.raw[i],state.low[i],state.high[i],state.white):0;
+  bool seen=state.calibrated && LineMath::position(state.signal,12,Unicum::LINE_THRESHOLD,state.position);
+  if(autoArm && state.mode==Mode::STOPPED && !state.microHigh && state.calibrated && state.selector>=0) arm();
+  if(startEdge && state.mode==Mode::ARMED) {
+    if(state.selector<0 || !seen) halt("START rechazado: selector invalido o sin linea");
+    else {
+      state.active=state.selector; state.mode=Mode::COUNTDOWN; stateSince=now;
+      previousError=(int)state.position-5500; filteredDerivative=baseNow=0;
+      state.reason="START MicroStart recibido";
+    }
+  }
+  if(state.mode==Mode::COUNTDOWN && now-stateSince>=Unicum::START_DELAY_MS) {
+    if(!seen || !state.microHigh) halt("START cancelado");
+    else { state.mode=Mode::RUNNING; lastSeen=now; state.reason="Siguiendo linea"; }
+  }
+  if(state.mode==Mode::RUNNING) {
+    if(!seen) {
+      motors.stop(); baseNow=0;
+      if(now-lastSeen>=Unicum::LOST_MS) halt("Linea perdida; requiere volver a armar");
+    } else {
+      if(now-lastSeen>20) { previousError=(int)state.position-5500; filteredDerivative=0; }
+      lastSeen=now;
+      const auto& p=state.profiles[state.active];
+      float error=(int)state.position-5500,delta=error-previousError;
+      previousError=error; filteredDerivative=0.7f*filteredDerivative+0.3f*delta;
+      float correction=constrain(p.kp*error+p.kd*filteredDerivative,-(float)p.maxPwm,(float)p.maxPwm);
+      int target=fabsf(error)<400 && fabsf(delta)<100 ? p.straight:p.base;
+      baseNow=constrain((float)target,baseNow-2.0f,baseNow+0.8f);
+      motors.set(constrain((int)(baseNow+correction),0,p.maxPwm),constrain((int)(baseNow-correction),0,p.maxPwm));
+    }
+  }
+  state.cycleUs=micros()-started;
+  if(state.cycleUs>Unicum::CONTROL_MS*1000) state.overruns++;
+  publish();
+}
+void controlTask(void*) {
+  TickType_t wake=xTaskGetTickCount();
+  const TickType_t period=max((TickType_t)1,pdMS_TO_TICKS(Unicum::CONTROL_MS));
+  for(;;) {
+    controlStep();
+    if(xTaskGetTickCount()-wake>=period) { wake=xTaskGetTickCount(); vTaskDelay(1); }
+    else vTaskDelayUntil(&wake,period);
+  }
+}
+bool enqueue(const Command& cmd) { return commandQueue && xQueueSend(commandQueue,&cmd,0)==pdTRUE; }
+String statusJson() {
+  Snapshot s=getSnapshot(); String json; json.reserve(2400);
+  json="{\"mode\":\""; json+=modeName(s.mode); json+="\",\"reason\":\""; json+=s.reason;
+  json+="\",\"calibrated\":";json+=s.calibrated ? "true":"false";
+  json+=",\"microstart\":";json+=s.microHigh ? "true":"false";
+  json+=",\"motorReady\":";json+=s.motorReady ? "true":"false";
+  json+=",\"white\":";json+=s.white ? "true":"false";
+  json+=",\"selector\":";json+=s.selector<0 ? 0:s.selector+1;
+  json+=",\"active\":";json+=s.active+1;
+  json+=",\"position\":";json+=s.position;
+  json+=",\"leftPwm\":";json+=s.left;json+=",\"rightPwm\":";json+=s.right;
+  json+=",\"cycleUs\":";json+=s.cycleUs;json+=",\"overruns\":";json+=s.overruns;
+  const char* names[]={"raw","signal","low","high","switchRaw"};
+  const uint16_t* arrays[]={s.raw,s.signal,s.low,s.high,s.switchRaw};
+  for(uint8_t a=0;a<5;a++) {
+    json+=",\"";json+=names[a];json+="\":[";
+    for(uint8_t i=0;i<(a==4 ? 3:12);i++) { if(i)json+=",";json+=arrays[a][i]; }json+="]";
+  }
+  json+=",\"strategies\":[";
+  for(uint8_t i=0;i<3;i++) {
+    if(i)json+=",";const auto& p=s.profiles[i];
+    json+="{\"name\":\"";json+=Unicum::STRATEGIES[i].name;
+    json+="\",\"base\":";json+=p.base;json+=",\"straight\":";json+=p.straight;
+    json+=",\"max\":";json+=p.maxPwm;json+=",\"kp\":";json+=String(p.kp,4);
+    json+=",\"kd\":";json+=String(p.kd,4);json+="}";
+  }json+="]}";return json;
+}
+bool parseNumber(const String& s,float& value) {
+  if(!s.length())return false;char* end=nullptr;value=strtof(s.c_str(),&end);
+  return end!=s.c_str() && *end=='\0' && isfinite(value);
+}
+void commandResponse(const Command& cmd) {
+  server.send(enqueue(cmd) ? 202:503,"text/plain","Orden en cola; verificar estado en pantalla.");
+}
+void setupWeb() {
+  server.on("/",HTTP_GET,[](){server.send_P(200,"text/html; charset=utf-8",WEB_PAGE);});
+  server.on("/status",HTTP_GET,[](){server.send(200,"application/json",statusJson());});
+  server.on("/arm",HTTP_POST,[](){Command cmd;cmd.action=Action::ARM;commandResponse(cmd);});
+  server.on("/stop",HTTP_POST,[](){Command cmd;cmd.action=Action::STOP;commandResponse(cmd);});
+  server.on("/cal",HTTP_POST,[](){Command cmd;cmd.action=Action::CAL;commandResponse(cmd);});
+  server.on("/config",HTTP_POST,[](){
+    float idx,b,s,m,kp,kd;
+    if(!parseNumber(server.arg("strategy"),idx)||idx<1||idx>3||idx!=floorf(idx)||
+       !parseNumber(server.arg("base"),b)||!parseNumber(server.arg("straight"),s)||
+       !parseNumber(server.arg("max"),m)||!parseNumber(server.arg("kp"),kp)||!parseNumber(server.arg("kd"),kd)||
+       b<0||b>s||s>m||m>255||kp<0||kp>0.2f||kd<0||kd>2||
+       (server.arg("white")!="0" && server.arg("white")!="1")) {
+      server.send(400,"text/plain","Valores invalidos: 0 <= base <= recta <= max <= 255.");return;
+    }
+    Snapshot ss=getSnapshot();
+    if(ss.microHigh || ss.mode==Mode::RUNNING || ss.mode==Mode::COUNTDOWN || ss.mode==Mode::CALIBRATING) {
+      server.send(409,"text/plain","Poner MicroStart en STOP y detener calibracion.");return;
+    }
+    Command cmd;cmd.action=Action::PROFILE;cmd.index=(int)idx-1;
+    cmd.base=b;cmd.straight=s;cmd.maxPwm=m;cmd.kp=kp;cmd.kd=kd;cmd.white=server.arg("white")=="1";
+    commandResponse(cmd);
+  });
+}
+void usbCommand(String input) {
+  input.trim();input.toLowerCase();Command cmd;
+  if(input=="arm")cmd.action=Action::ARM;
+  else if(input=="stop")cmd.action=Action::STOP;
+  else if(input=="cal")cmd.action=Action::CAL;
+  else if(input=="white"||input=="black") {cmd.action=Action::COLOR;cmd.white=input=="white";}
+  else if(input=="status") {Serial.println(statusJson());return;}
+  else if(input=="sensors") {
+    Snapshot s=getSnapshot();
+    for(uint8_t i=0;i<12;i++) Serial.printf("S%02u C%u raw=%u linea=%u min=%u max=%u\n",i+1,Unicum::SENSOR_CHANNELS[i],s.raw[i],s.signal[i],s.low[i],s.high[i]);
+    Serial.printf("Selector=%d MicroStart=%d\n",s.selector+1,s.microHigh);return;
+  } else {Serial.println("arm stop cal white black status sensors | arranque solo MicroStart");return;}
+  Serial.println(enqueue(cmd) ? "Orden en cola; revisar status":"Cola llena");
+}
+void loadSettings() {
+  state.motorReady=motors.begin();state.white=Unicum::DEFAULT_WHITE_LINE;
+  for(uint8_t i=0;i<3;i++) { const auto& p=Unicum::STRATEGIES[i];state.profiles[i]={p.base,p.straight,p.maxPwm,p.kp,p.kd}; }
+  nvsReady=storage.begin("unicum-c3-v2",false);
+  if(!nvsReady)return;
+  Profile saved[3];
+  if(storage.getBytesLength("profiles")==sizeof(saved)) {
+    storage.getBytes("profiles",saved,sizeof(saved));
+    for(uint8_t i=0;i<3;i++) {
+      auto& s=saved[i];
+      if(s.base>=0&&s.base<=s.straight&&s.straight<=s.maxPwm&&s.maxPwm<=255&&
+         isfinite(s.kp)&&s.kp>=0&&s.kp<=0.2f&&isfinite(s.kd)&&s.kd>=0&&s.kd<=2)state.profiles[i]=s;
+    }
+  }
+  state.white=storage.getBool("white",Unicum::DEFAULT_WHITE_LINE);
+  state.calibrated=storage.getBool("valid",false)&&storage.getBytesLength("low")==sizeof(state.low)&&storage.getBytesLength("high")==sizeof(state.high);
+  if(state.calibrated) {
+    storage.getBytes("low",state.low,sizeof(state.low));storage.getBytes("high",state.high,sizeof(state.high));
+    for(uint8_t i=0;i<12;i++)if(state.high[i]>4095||state.low[i]>=state.high[i]||state.high[i]-state.low[i]<Unicum::MIN_CAL_SPAN)state.calibrated=false;
+  }
+}
+void setup() {
+  Serial.begin(115200);loadSettings();beginSensors();
+  pinMode(Unicum::MICROSTART_PIN,INPUT_PULLDOWN);button.begin(Unicum::CAL_BUTTON);
+  commandQueue=xQueueCreate(8,sizeof(Command));
+  if(!commandQueue || xTaskCreate(controlTask,"unicum-control",6144,nullptr,3,nullptr)!=pdPASS) {
+    motors.stop();Serial.println("ERROR creando control. Arranque bloqueado.");while(true)delay(100);
+  }
+  WiFi.mode(WIFI_AP);WiFi.setSleep(false);
+  bool ap=WiFi.softAP(Unicum::AP_SSID,Unicum::AP_PASSWORD);
+  setupWeb();if(ap)server.begin();
+  Serial.println("UNICUM v0.2 C3 + MUX12 | USB CDC 115200 | http://192.168.4.1");
+  if(!ap)Serial.println("AP fallo; control local MicroStart sigue disponible.");
 }
 void loop() {
-  uint32_t now=millis();
-  // Procesar botones antes de imprimir/comunicar.
-  for(uint8_t i=0;i<3;i++) {
-    uint8_t event=buttons[i].poll(now);
-    if(!event) continue;
-    if(mode==Mode::RUNNING || mode==Mode::COUNTDOWN || mode==Mode::CALIBRATING) { stopRobot(); continue; }
-    if(event==1) { strategyIndex=i; startRobot(); }
-    else if(i==0) beginCalibration();
-    else if(i==1) enterWifi();
-    else { if(mode==Mode::WIFI_SETUP) exitWifi(); stopRobot(); }
+  for(uint8_t i=0;i<32 && Serial.available();i++) {
+    char c=Serial.read();
+    if(c=='\n') {usbCommand(serialBuffer);serialBuffer="";}
+    else if(c!='\r') {if(serialBuffer.length()<80)serialBuffer+=c;else serialBuffer="";}
   }
-  readCommands(Serial,serialBuffer);
-  if(btReady) readCommands(bt,btBuffer);
-  if(mode==Mode::WIFI_SETUP) {
-    server.handleClient();
-    if(pendingStart) { pendingStart=false; startRobot(); }
-    else if(pendingExitWifi) { pendingExitWifi=false; exitWifi(); }
-  }
-  uint32_t t=micros();
-  if(t-lastTick>=Unicum::CONTROL_US) { lastTick=t; controlTick(millis()); }
-  // Sin streaming en marcha: imprimir comandos/status puede alterar temporización.
-  delay(1);
+  server.handleClient();delay(2);
 }

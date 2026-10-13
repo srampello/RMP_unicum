@@ -1,77 +1,90 @@
-# Firmware v0.1
+# Firmware v0.2 · C3 + MUX + MicroStart
 
-## Sensado
+## Lectura y telemetría
 
-12 canales directos de `Config.h`. ADC 12 bits, una conversión descartada y cuatro
-muestras promediadas por canal. El firmware no lee sensores mientras el AP Wi-Fi
-está activo. El tick se solicita cada 5000 µs (~200 Hz); `cycleUs` mide su ejecución
-y `overruns` cuenta ticks que duran más de 5 ms. No se garantiza 200 Hz real hasta
-medir en hardware: ADC, radio y scheduler afectan el período. Ajustar antes de
-subir velocidad; Kd se aplica a diferencia por ciclo, no por segundo.
+GPIO0=ADC1_CH0. C0..C11 contienen la barra; C12..C14 el selector 1P3T. S0..S3
+seleccionan binariamente cada canal; esperar 120 µs, descartar una conversión y
+promediar dos muestras. Solo la tarea de control accede al MUX/ADC. El servidor
+web lee una copia del estado, nunca conmuta el MUX.
 
-Calibración manual con robot quieto: guardar extremos durante 8 s, rango mínimo
-150 ADC en **cada** canal. Persistencia NVS con marca de validez y validación al
-cargar. NVS guarda perfiles numéricos, polaridad y calibración; recalibrar si cambian
-pines, electrónica o altura. `unicum-v1` es el namespace para esta configuración.
+Wi-Fi AP permanece activo en calibración y marcha. Ya no se suspende la barra por
+usar Wi-Fi: todas las conversiones pasan por ADC1. Web actualiza aproximadamente
+4 veces/s; el control tiene período objetivo de 5 ms, independiente del HTTP.
+C3 es de un solo núcleo: tareas de radio/scheduler pueden producir jitter; ver
+`cycleUs` y `overruns`, y medir período real en pista. Kd es por diferencia de
+ciclo, no derivada por segundo. Si se cambia frecuencia, volver a ajustar Kd.
 
-Normalización por canal 0..1000: 1000 = color de línea elegido. En línea blanca
-se invierte lectura calibrada, porque ADC blanco es bajo. Posición por promedio
-ponderado entre 0 y 11000; centro **5500**, entre S06 y S07. Un pico de al menos
-250 normalizados señala línea; pesos >50 descartan ruido bajo. Umbral ajustable
-en `Config.h`. No identifica meta/cruces: una barra totalmente sobre color de
-línea entrega centro; una barra sin línea inicia frenado.
+Tarea de control prioridad 3, stack 6144 bytes, cola de ocho órdenes; procesa hasta
+cuatro por tick. HTTP/USB envían órdenes; configuración se vuelve a validar cuando
+la tarea la procesa. Estado compartido copiado en sección crítica corta. ADC,
+motores, perfiles y NVS tienen un solo propietario para evitar carreras de datos.
+Las operaciones NVS se hacen detenido. No imprimir sensores desde el control.
 
-## Seguimiento PD (Ki=0)
+## Selector y START/STOP
 
-Error=posición−5500. Error positivo requiere girar a derecha:
+Selector de tres contactos mediante los canales libres del MUX: exactamente uno
+LOW y dos HIGH. Estado estable 50 ms, consultado cada 25 ms. Perfil de carrera
+se captura al START; cambiar el switch en marcha no altera ganancias/velocidades.
 
-`correccion = Kp*error + Kd*derivada_filtrada`
+MicroStart alimentado a 3,3 V, HIGH=START, LOW=STOP. Su SIGNAL también llega a
+STBY del driver: LOW lo deshabilita por hardware aunque el servidor/tarea tarde.
+Ese estado es alta impedancia, **no frenado activo**. La latencia/inercia real debe
+medirse; no confundir cortar empuje con detener físicamente instantáneamente.
 
-`PWM_izq = base + correccion`, `PWM_der = base - correccion`.
+`StartGate` exige **LOW al menos 50 ms y luego HIGH al menos 20 ms**, una sola
+vez por secuencia. HIGH al encender/reset no inicia el robot. STOP se aplica sin
+retardo de debounce en el firmware y directamente en STBY. No se necesita seguir
+apuntando el control remoto después de START: MicroStart mantiene su estado.
 
-Filtro derivada 0,7 valor previo + 0,3 diferencia actual. PWM de seguimiento
-limitado a 0..máximo; **no invierte motores para buscar la línea**. Base sube
-suavemente 0,8 PWM/tick y baja 2 PWM/tick; rectas usan incremento cuando
-|error|<400 y |diferencia|<100. Valores iniciales sin validación de pista.
+Con calibración válida y selector válido, autoarmado al encender/completar
+calibración con MicroStart LOW. “Armar” por web, USB `arm` o BOOT corto deja el
+robot esperando otra secuencia LOW→HIGH. START se rechaza si no ve línea/selector.
+No hay botón web/USB para forzar movimiento, y la web no suplanta MicroStart.
 
-| Perfil | Base | Recta | Máximo | Kp | Kd |
+Demora extra por firmware `START_DELAY_MS=0`; si el reglamento exige demora,
+ajustar ese parámetro. STOP cancela tanto espera como marcha. Parada web/USB/BOOT
+o pérdida prolongada de línea desarma; requieren rearmado y nuevo START. STOP de
+MicroStart permite autoarmado para el próximo START válido (según el propio módulo).
+
+## Calibración y control
+
+Calibración manual de 8 s sobre blanco/negro, motores quietos y MicroStart LOW.
+Rango mínimo 150 ADC por canal: uno defectuoso invalida todo el arranque. Al iniciar
+calibración se invalida marca NVS; al completar correctamente guarda extremos.
+Un START durante calibración la cancela. Namespace **unicum-c3-v2**, distinto del
+WROOM anterior. Recalibrar si cambia altura, electrónica, canal/pin o pista/luz.
+
+Lectura cruda 0..4095. Normalización 0..1000 por canal: color de línea elegido=1000.
+Blanco suele producir ADC bajo, por eso línea blanca invierte lectura. Posición
+ponderada 0..11000, centro=5500. Umbral de presencia=250 y pesos >50.
+No distingue meta ni cruces; toda barra sobre línea devuelve posición central.
+
+Control PD, Ki=0: error=posición−5500; corrección=Kp×error + Kd×diferencia filtrada.
+Filtro derivada=0,7 anterior + 0,3 diferencia. Error positivo: aumentar izquierda
+y reducir derecha. PWM de seguimiento solo positivo, 0..máximo (sin giro de búsqueda).
+Arranque suave: base sube 0,8/tick y baja 2/tick. Recta si |error|<400 y |delta|<100.
+
+| Estrategia | Base | Recta | Máximo | Kp | Kd |
 | --- | --- | --- | --- | --- | --- |
 | Conservadora | 80 | 95 | 130 | 0,035 | 0,10 |
 | Equilibrada | 105 | 120 | 170 | 0,040 | 0,14 |
 | Rápida | 130 | 145 | 200 | 0,045 | 0,18 |
 
-Son **tres configuraciones del mismo seguidor**, no rutas programadas ni volantazo.
-No usar estas ganancias como ajuste final para un Pololu cuyo modelo no conocemos.
-Orden recomendado: comprobar giro/dirección, suficiente PWM para iniciar marcha,
-Kp para corregir y Kd para amortiguar, luego rectas. Mantener margen corriente/térmica.
+Son semillas, no velocidades verificadas para N20 2000 RPM. Motores sin encoders:
+PWM no equivale a velocidad física. Ajustar por rueda/batería/pista. Si falta línea,
+PWM va a cero inmediatamente; si vuelve antes de 150 ms, retoma con rampa. Si no,
+queda desarmado. Si START permanece HIGH, línea perdida frena activamente mediante
+PWM cero; STOP MicroStart baja STBY y deja rueda libre.
 
-## Estados y parada
+## Interfaz y límites
 
-Inicio detenido. Calibración manual → detenido. Inicio con calibración válida →
-cuenta atrás 3 s → verificar línea → marcha. Cualquier botón durante marcha,
-calibración o cuenta atrás detiene. En ausencia de línea frena **inmediatamente**;
-si no reaparece por 150 ms queda detenido hasta otro arranque. Si reaparece antes,
-retoma suavemente. No hace giro de búsqueda a ciegas.
+AP RMP_UNICUM, clave inicial Unicum2026, http://192.168.4.1. Muestra raw/señal de
+12 canales, min/max (USB/JSON), selector físico, perfil activo, MicroStart, PWM y
+tiempos. Web edita perfiles numéricos y polaridad solamente con robot detenido y
+MicroStart STOP. Guardado en NVS; cambiar perfil de edición no selecciona carrera.
+No carga credenciales de una red externa; el robot genera su propio AP.
 
-Entrar Wi-Fi siempre detiene y suspende ADC. Salir Wi-Fi desactiva AP/controlador,
-espera 50 ms con motores quietos y vuelve a lectura. No se apaga Bluetooth al
-arrancar; ADC2 comparte recurso con Wi-Fi, no con SPP. La desconexión de cualquier
-enlace no funciona como paro de emergencia.
-
-STBY está habilitado por hardware, no por firmware: PWM cero usa short-brake.
-Abrir STBY coloca salidas en alta impedancia. No hay lectura del interruptor STBY,
-así que el software no sabe si está abierto. Tras abrirlo en marcha, también
-detener por botón/comando antes de volver a cerrarlo para evitar reanudar movimiento.
-
-## Cambios y límites
-
-Configuración de hardware en `Config.h`; ejecutar `tools/sync_headers.py` para
-actualizar copias de pruebas. Motor A=izquierda, B=derecha. PWM 20 kHz/8 bits,
-API `ledcAttach`/`ledcWrite` de core 3.x. Serial/SPP limita entrada a 32 caracteres
-por iteración; las respuestas de comandos siguen pudiendo añadir latencia.
-
-No hay encoder, control de velocidad física, medición de corriente, lectura de
-batería, OTA ni telemetría inalámbrica continua. Si se necesita **Wi-Fi + doce
-canales en carrera**, cambiar MCU (por ejemplo S3 con ADC1 suficiente y pines
-expuestos), añadir ADC externos o cambiar a lectura RC. Cambiar solo firmware
-no soluciona ADC2/Wi-Fi del WROOM; no se propone MUX por el requisito del proyecto.
+No hay BluetoothSerial: C3 soporta BLE, no SPP Classic; no se implementó servicio
+BLE en v0.2. USB CDC On Boot obligatorio; no usar UART0 en GPIO20/21 (S2/S3 del MUX) ni GPIO8 como
+LED desde otro código. No hay encoders, corriente/batería, OTA ni detección de meta.
+Pérdida de Wi-Fi no detiene el robot; START/STOP sigue en MicroStart.

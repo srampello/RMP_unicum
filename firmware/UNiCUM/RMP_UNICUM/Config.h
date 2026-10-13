@@ -1,30 +1,35 @@
 #pragma once
 #include <Arduino.h>
-
+#if !defined(CONFIG_IDF_TARGET_ESP32C3)
+#error "UNICUM v0.2 requiere ESP32-C3. Seleccionar ESP32C3 Dev Module."
+#endif
+#if !ARDUINO_USB_CDC_ON_BOOT
+#error "Habilitar USB CDC On Boot: GPIO20/21 se usan para el MUX, no UART0."
+#endif
 namespace Unicum {
-constexpr uint8_t SENSOR_COUNT = 12;
-// Izquierda -> derecha, mirando en la dirección de avance del robot.
-constexpr uint8_t SENSOR_PINS[SENSOR_COUNT] = {36,39,34,35,32,33,25,26,27,14,13,4};
-constexpr uint8_t BUTTON_PINS[3] = {5,15,23};
-constexpr uint8_t AIN1=16, AIN2=17, PWMA=21; // Canal A = izquierdo
-constexpr uint8_t BIN1=18, BIN2=19, PWMB=22; // Canal B = derecho
-// STBY se habilita por jumper/interruptor a 3V3, con 10k a GND.
+constexpr uint8_t SENSOR_COUNT=12;
+constexpr uint8_t SENSOR_CHANNELS[SENSOR_COUNT]={0,1,2,3,4,5,6,7,8,9,10,11};
+constexpr uint8_t MUX_SELECT_PINS[4]={2,8,20,21}; // S0..S3
+constexpr uint8_t MUX_SIG=0; // ADC1_CH0: lectura con Wi-Fi activo
+constexpr uint8_t STRATEGY_CHANNELS[3]={12,13,14}; // Selector 1P3T, común a GND
+constexpr uint8_t MICROSTART_PIN=3, CAL_BUTTON=9; // BOOT, activo LOW
+constexpr uint8_t AIN1=4, AIN2=5, PWMA=1;
+constexpr uint8_t BIN1=6, BIN2=7, PWMB=10;
+// STBY <- SIGNAL MicroStart (3.3 V), con interruptor en serie y 10k a GND.
 constexpr bool INVERT_LEFT=false, INVERT_RIGHT=false;
-constexpr uint32_t PWM_HZ=20000, CONTROL_US=5000; // PD inicial a 200 Hz
-constexpr uint8_t ADC_SAMPLES=4;
+constexpr uint32_t PWM_HZ=20000, CONTROL_MS=5;
+constexpr uint8_t ADC_SAMPLES=2;
+constexpr uint16_t MUX_SETTLE_US=120;
 constexpr uint16_t MIN_CAL_SPAN=150, LINE_THRESHOLD=250;
-constexpr uint32_t CAL_MS=8000, START_DELAY_MS=3000, LOST_MS=150;
-constexpr bool ENABLE_BLUETOOTH=true;
-constexpr char BT_NAME[]="RMP_UNICUM_BT";
-constexpr char AP_SSID[]="RMP_UNICUM_SETUP";
-constexpr char AP_PASSWORD[]="Unicum2026"; // Cambiar antes de utilizar.
-// La línea blanca produce lectura ADC baja con el circuito de colector.
+constexpr uint16_t SELECTOR_LOW=500, SELECTOR_HIGH=2500;
+constexpr uint32_t CAL_MS=8000, START_DELAY_MS=0, LOST_MS=150;
 constexpr bool DEFAULT_WHITE_LINE=true;
+constexpr char AP_SSID[]="RMP_UNICUM";
+constexpr char AP_PASSWORD[]="Unicum2026";
 struct Strategy { const char* name; int base, straight, maxPwm; float kp, kd; };
-constexpr Strategy STRATEGIES[3] = {
-  {"Conservadora",80,95,130,0.035f,0.10f},
-  {"Equilibrada",105,120,170,0.040f,0.14f},
-  {"Rapida",130,145,200,0.045f,0.18f}
-};
-// Semillas de puesta en marcha; NO son ajustes validados en este robot.
+constexpr Strategy STRATEGIES[3]={
+ {"Conservadora",80,95,130,0.035f,0.10f},
+ {"Equilibrada",105,120,170,0.040f,0.14f},
+ {"Rapida",130,145,200,0.045f,0.18f}
+}; // Valores iniciales de prueba, pendientes de pista y ruedas.
 }

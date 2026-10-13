@@ -1,31 +1,38 @@
-# Validación de v0.1 · 2026-10-11
+# Validación v0.2 · 2026-10-13
 
-## Verificaciones ejecutadas
+## Comprobaciones ejecutadas
 
-- `tests/check_project.py`: correcto; 21 GPIO sin duplicados, 12 entradas ADC,
-  ningún uso de GPIO de flash/USB ni GPIO12, y tres `.ino` en carpetas homónimas.
-- `tests/test_line_math.cpp`: compilado con g++ C++11, `-Wall -Wextra -Werror`;
-  pasan casos de normalización blanca/negra, saturación, calibración degenerada,
-  centro, extremos y ausencia/umbral de línea.
-- Los **tres sketches compilaron correctamente** para `esp32:esp32:esp32` con
-  Arduino CLI 1.5.2-rc.1 y **Arduino-ESP32 3.3.12**.
+- `tests/check_project.py`: sin GPIO duplicados; ADC1 GPIO0; C0..C11 para QRE y
+  C12..C14 para selector. Motores fuera de strapping; BOOT y USB no se comparten.
+  Trece GPIO utilizados contando BOOT, tres sketches independientes/homónimos.
+- `tests/test_line_math.cpp`: normalización blanca/negra, saturación, centro,
+  extremos, ausencia/umbral de línea. Compila con `-Wall -Wextra -Werror`.
+- `tests/test_start_gate.cpp`: HIGH al encender no inicia; LOW 50 ms seguido de
+  HIGH 20 ms inicia una vez; LOW breve no habilita rearranque; rollover de millis.
+- Tres sketches compilados correctamente con **Arduino-ESP32 3.3.12**, Arduino
+  CLI 1.5.2-rc.1, FQBN **esp32:esp32:esp32c3:CDCOnBoot=cdc**, warnings all.
+- Sintaxis JavaScript de WebPage.h comprobada con `node --check`.
 - Diagramas SVG renderizados y revisados visualmente.
 
-| Sketch | Flash usada | RAM estática usada | Partición de aplicación |
+| Sketch | Flash usada | RAM estática | Partición APP |
 | --- | --- | --- | --- |
-| RMP_UNICUM | 1.672.703 bytes (53%) | 63.936 bytes (19%) | Huge APP, 3.145.728 bytes |
-| RMP_UNICUM_SENSORES | 279.508 bytes (21%) | 22.220 bytes (6%) | Default, 1.310.720 bytes |
-| RMP_UNICUM_MOTORES | 299.771 bytes (22%) | 22.336 bytes (6%) | Default, 1.310.720 bytes |
+| RMP_UNICUM | 1.043.409 bytes (79%) | 38.696 bytes (11%) | Default, 1.310.720 bytes |
+| RMP_UNICUM_SENSORES | 967.011 bytes (73%) | 36.576 bytes (11%) | Default, 1.310.720 bytes |
+| RMP_UNICUM_MOTORES | 326.012 bytes (24%) | 14.636 bytes (4%) | Default, 1.310.720 bytes |
 
-El principal genera una advertencia del core 3.3.12: `BluetoothSerial` está
-marcado como deprecado para el soporte por defecto futuro en 4.0.0. Compila y
-enlaza en 3.3.12; conservar core 3.x para esta versión del proyecto.
-RAM indicada es estática de compilación, no memoria dinámica libre durante radio.
+Compilación sin advertencias del proyecto. RAM indicada es la estática de link;
+no mide memoria libre dinámica durante Wi-Fi/tarea. El test sensores incluye
+Wi-Fi, por eso su binario es mayor que el de motores. No hay binarios publicados:
+compilar/cargar con placa y opciones indicadas.
 
-## Validación pendiente en hardware
+## Pendiente en el robot
 
-No se ejecutó firmware en el robot. Quedan por medir: placa comercial exacta,
-consumo/bloqueo de Pololu, reguladores bajo carga, contraste de los doce canales,
-tiempo de lectura real, latencia de parada, transición Wi-Fi/ADC2, Bluetooth,
-interfaz web en el ESP32, dirección motores y ajuste PD en pista. La compilación
-no sustituye esas pruebas. Ver la secuencia de `PUESTA_EN_MARCHA.md`.
+No se probó en hardware. Verificar variante Super Mini, GPIO8/LED/strapping,
+MicroStart real alimentado a 3V3 y polaridad de SIGNAL, cableado STBY/STOP,
+selector, contraste/crosstalk del MUX, tiempo de asentamiento, latencia y jitter
+bajo Wi-Fi, ciclo real del control y efecto de mensajes de arranque.
+También consumo/bloqueo N20, 6 V regulados, picos de frenado, térmica del driver,
+sentido de motores y ajuste PD en pista. Compilar no acredita rendimiento físico.
+
+La v0.1 con ESP32 WROOM y lecturas directas está en el historial Git; su validación
+y pinout ya no corresponden al firmware actual.

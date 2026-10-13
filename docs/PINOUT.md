@@ -1,88 +1,116 @@
-# Distribución de pines · ESP32 WROOM clásico
+# Pinout v0.2 · ESP32-C3 Super Mini
 
-Los números son **GPIO**, no posiciones del conector de la placa. Se presupone
-una placa de desarrollo basada en WROOM/ESP32S sin PSRAM que expone estos GPIO.
-Confirmar su serigrafía y pinout antes de soldar. No aplicar este mapa a C3, S3,
-S2, ESP32-CAM ni WROVER; GPIO16/17 pueden estar ocupados en otros módulos.
+Números **GPIO**, no posición de patas. Validar la placa concreta: Super Mini
+es un formato comercial con variantes, no un modelo de placa oficial Espressif.
+Se presupone que expone GPIO0..10 y GPIO20/21. USB nativo usa 18/19.
 
-## Sensores, izquierda a derecha mirando hacia el avance
+## 74HC4067
 
-| Sensor | GPIO | Unidad/canal | Alias frecuente |
-| --- | --- | --- | --- |
-| S01 | 36 | ADC1_CH0 | VP / SVP |
-| S02 | 39 | ADC1_CH3 | VN / SVN |
-| S03 | 34 | ADC1_CH6 | D34 |
-| S04 | 35 | ADC1_CH7 | D35 |
-| S05 | 32 | ADC1_CH4 | D32 |
-| S06 | 33 | ADC1_CH5 | D33 |
-| S07 | 25 | ADC2_CH8 | D25 |
-| S08 | 26 | ADC2_CH9 | D26 |
-| S09 | 27 | ADC2_CH7 | D27 |
-| S10 | 14 | ADC2_CH6 | D14 |
-| S11 | 13 | ADC2_CH4 | D13 |
-| S12 | 4 | ADC2_CH0 | D4 |
-
-GPIO34/35/36/39 solo son entradas y no disponen de pull-up interno; la barra
-provee el pull-up del colector. GPIO37/38 del chip no se exponen en el WROOM usado.
-Cada salida de sensor tiene su propia entrada. Se leen secuencialmente mediante
-el ADC interno; **sin multiplexor externo**, sin conversión simultánea de 12 canales.
-
-## Driver TB6612FNG
-
-| Terminal del módulo | Conectar a | Función |
+| Terminal | Conectar | Nota |
 | --- | --- | --- |
-| AIN1 | GPIO16 | Dirección izquierda 1 |
-| AIN2 | GPIO17 | Dirección izquierda 2 |
-| PWMA | GPIO21 + 10 kΩ a GND | PWM izquierda 20 kHz |
-| BIN1 | GPIO18 | Dirección derecha 1 |
-| BIN2 | GPIO19 | Dirección derecha 2 |
-| PWMB | GPIO22 + 10 kΩ a GND | PWM derecha 20 kHz |
-| STBY | 3V3 mediante jumper/interruptor; 10 kΩ a GND | Habilitación física |
-| VCC | 3V3 | Alimentación lógica, compatible con GPIO |
-| VM | Rail de motores apropiado | No es VCC lógico |
-| GND | Masa común | Unir lógica, driver, barra y batería |
-| AO1/AO2 | Motor izquierdo | Invertir cables o `INVERT_LEFT` si corresponde |
-| BO1/BO2 | Motor derecho | Invertir cables o `INVERT_RIGHT` si corresponde |
+| VCC | 3V3 | 74HC, no confundir con HCT |
+| GND | GND común | Compartir masa con barra y driver |
+| EN / E | GND | Habilitación activa en LOW, sin GPIO |
+| S0 | GPIO2 | Bit menos significativo; 10 kΩ a 3V3 |
+| S1 | GPIO8 | 10 kΩ a 3V3; puede compartir LED integrado |
+| S2 | GPIO20 | Dirección bit 2 |
+| S3 | GPIO21 | Dirección bit 3 |
+| SIG / COM | GPIO0 | ADC1_CH0, entrada analógica |
+| C0..C11 | S01..S12 | Doce colectores analógicos independientes |
+| C12 / C13 / C14 | Selector posiciones 1 / 2 / 3 | Pull-up 10 kΩ a 3V3 en cada canal |
+| C15 | GND | No usado |
 
-Se usan seis GPIO en el driver: **STBY no consume GPIO**. PWM a cero frena según
-la tabla del TB6612; abrir STBY produce alta impedancia, no frenado activo.
-Los pull-down externos en PWM mantienen la orden a cero durante reset/carga.
-Verificar que el módulo comprado no tenga pull-ups incompatibles o STBY puenteado.
+GPIO2/8 son strapping: los pull-ups mantienen el arranque correcto, y el MUX no
+fuerza esos pines. GPIO9 queda como BOOT/calibración. No usar LED de GPIO8 como
+indicador desde otra librería: es S1 del MUX; que parpadee es normal en placas
+con LED activo LOW. No cambiar resistencias/puentes del LED sin revisar esa placa.
 
-## Botones
-
-| Señal | GPIO | Cableado |
+| Sensor | Canal del MUX | Orden |
 | --- | --- | --- |
-| B1 | 5 | Pulsador normalmente abierto a GND; 10 kΩ a 3V3 |
-| B2 | 15 | Pulsador normalmente abierto a GND; 10 kΩ a 3V3 |
-| B3 | 23 | Pulsador normalmente abierto a GND; 10 kΩ a 3V3 |
+| S01 | C0 | Extremo izquierdo |
+| S02 | C1 | |
+| S03 | C2 | |
+| S04 | C3 | |
+| S05 | C4 | |
+| S06 | C5 | Centro izquierdo |
+| S07 | C6 | Centro derecho |
+| S08 | C7 | |
+| S09 | C8 | |
+| S10 | C9 | |
+| S11 | C10 | |
+| S12 | C11 | Extremo derecho |
 
-Firmware con `INPUT_PULLUP`, activos en LOW y antirrebote 30 ms.
-GPIO5/15 son strapping: mantenerlos altos durante reset con botones sueltos.
-GPIO5 afecta temporización de SDIO slave; GPIO15 afecta SDIO y mensajes ROM.
-El proyecto no usa SDIO slave; no se emplean GPIO0/2/12 para evitar afectar descarga
-o tensión de flash. No agregar capacitores grandes que alteren los straps.
+Orden mirando hacia el avance. Centro de posición=5500. Solo SIG ocupa ADC.
 
-## Conector de barra J1 (propuesta 1×15)
+## Selector de estrategias
 
-| Pin J1 | Señal | Conectar |
+Propuesta: **selector rotativo de un polo / tres posiciones (1P3T)**.
+COM del selector a GND; cada contacto a C12, C13 o C14. Cada uno de esos canales
+lleva pull-up propio de 10 kΩ a 3V3. La posición elegida queda cerca de 0 V y las
+otras cerca de 3,3 V. **No conectar COM a la batería ni a 5 V.**
+
+Firmware: elegido <500 ADC, no elegidos ≥2500. Entre rangos, ninguno elegido o
+más de uno LOW = inválido. Estabilidad 50 ms; muestreo de selector cada 25 ms.
+Cambiar solo detenido. En marcha se conserva el perfil capturado al START.
+Un DIP puede reemplazarlo con tres interruptores, pero se debe activar exactamente
+uno. Un selector de dos bits necesitaría cambiar el decodificador.
+
+## TB6612FNG
+
+| Terminal | Conectar | Función |
 | --- | --- | --- |
-| 1 | +5V_LED | Regulador 5 V, solo emisores |
-| 2 | +3V3_SENS | Lógica 3,3 V, pull-ups receptores |
-| 3 | GND | Masa común |
-| 4 | S01 | GPIO36 |
-| 5 | S02 | GPIO39 |
-| 6 | S03 | GPIO34 |
-| 7 | S04 | GPIO35 |
-| 8 | S05 | GPIO32 |
-| 9 | S06 | GPIO33 |
-| 10 | S07 | GPIO25 |
-| 11 | S08 | GPIO26 |
-| 12 | S09 | GPIO27 |
-| 13 | S10 | GPIO14 |
-| 14 | S11 | GPIO13 |
-| 15 | S12 | GPIO4 |
+| AIN1 | GPIO4 + 10 kΩ a GND | Dirección izquierda 1 |
+| AIN2 | GPIO5 + 10 kΩ a GND | Dirección izquierda 2 |
+| PWMA | GPIO1 + 10 kΩ a GND | PWM izquierdo, 20 kHz / 8 bits |
+| BIN1 | GPIO6 + 10 kΩ a GND | Dirección derecha 1 |
+| BIN2 | GPIO7 + 10 kΩ a GND | Dirección derecha 2 |
+| PWMB | GPIO10 + 10 kΩ a GND | PWM derecho |
+| VCC | 3V3 | Lógica |
+| VM | Rail 6 V regulados | Potencia N20 |
+| GND | Masa común | Señales/potencia |
+| AO1/AO2 | N20 izquierdo | 6 V, 2000 RPM |
+| BO1/BO2 | N20 derecho | 6 V, 2000 RPM |
+| STBY | SIGNAL MicroStart por interruptor en serie; 10 kΩ a GND | Habilitación hardware |
 
-Pin 1 marcado en ambas placas. Es un conector propuesto, no compatible pin a pin
-con una QTR-8A. Reserva GPIO0/1/2/3/12; GPIO6..11 quedan para flash. No hay pines
-seguros sobrantes suficientes para un juego completo de encoders sin rediseño.
+No son cuatro PWM: se mantienen cuatro direcciones digitales y dos PWM normales.
+GPIO5 es digital aquí; no se usa su ADC2. PWM a cero con STBY alto frena; STBY bajo
+pone salidas en alta impedancia (rueda libre). No puente STBY a 3V3 en este diseño.
+Si el breakout trae STBY unido a VCC o un pull-up, corregir según su esquema.
+
+**USB CDC On Boot: Enabled obligatorio.** GPIO20/21 controlan S2/S3 del MUX:
+no conectar UART ni usar `Serial0/Serial1` sobre ellos. Mensajes ROM pueden variar
+la selección de canal al boot, pero no se usan como PWM de motores. Los PWM están
+en GPIO1/10, con pull-downs a GND; firmware inicializa PWM a cero antes de dirección.
+AIN/BIN también llevan pull-downs; mantener MicroStart en STOP e interruptor STBY
+abierto durante carga/reset y pruebas de alimentación.
+
+## MicroStart JSumo
+
+| Terminal | Conectar |
+| --- | --- |
+| Alimentación (`+5V` en algunas serigrafías) | **3V3**, conforme a la compatibilidad 3,3 V del fabricante |
+| GND | Masa común |
+| SIGNAL | GPIO3 y, mediante interruptor de habilitación, STBY del TB6612 |
+
+MicroStart alimentado a 3V3: SIGNAL HIGH=START, LOW=STOP, de acuerdo con el ejemplo
+JSumo. Confirmar tensión/polaridad del módulo real con multímetro y motor desconectado.
+Si se alimenta a 5 V, **no conectar SIGNAL directo al C3**: necesita adaptación de
+nivel apropiada. Se propone 3,3 V para evitarla; no hay resistencia/divisor que
+convierta la alimentación del módulo.
+
+GPIO3 tiene `INPUT_PULLDOWN`; STBY tiene pull-down físico 10 kΩ. El MicroStart
+actúa como autorización, no como interruptor de batería. El interruptor en serie
+con STBY permite deshabilitar el driver; enviar STOP y detener antes de cerrarlo
+otra vez, porque el firmware no detecta ese interruptor abierto.
+
+## BOOT y conectores
+
+GPIO9 / BOOT integrado: largo ≥1,2 s detenido = calibrar; corto = armar con
+MicroStart en LOW; presionar durante marcha = detener. No mantener BOOT al reset
+salvo para descargar firmware. Calibración exige MicroStart STOP.
+
+Barra propuesta J1 1×15: 1=5V_LED, 2=3V3_SENS, 3=GND, 4..15=S01..S12 hacia
+C0..C11. MUX montado inicialmente en la placa de control. J2 MicroStart: 3V3,
+GND, SIGNAL (orden físico según módulo, no asumir); J3 selector: GND,C12,C13,C14.
+Marcar pin 1 en todos los conectores. Se usan los 13 GPIO disponibles incluyendo
+BOOT; no quedan GPIO libres para encoders sin ampliar/rediseñar.

@@ -1,26 +1,33 @@
 Referencia,Cantidad,Componente,Valor o especificacion,Nota
-U1,1,Placa ESP32 WROOM ESP32S,ESP32 clasico sin PSRAM con GPIO del mapa,Confirmar placa comercial
-U2,1,Modulo TB6612FNG,VCC 3.3V VM 6V,Confirmar consumo motores y disipacion
+U1,1,Placa ESP32-C3 Super Mini,GPIO0..10 y 20/21 USB CDC,Confirmar variante real
+U2,1,Modulo TB6612FNG,VCC 3.3V VM 6V,Sin puente STBY a VCC
+U3,1,Multiplexor,74HC4067 a 3.3V,EN GND y C15 GND
+U4,1,MicroStart JSumo,Alimentacion 3.3V,SIGNAL a GPIO3 y STBY
 Q01-Q12,12,Sensor reflectivo,QRE1113GR SMD,Pinout onsemi
 RLED01-RLED12,12,Resistencia LED,180 ohm minimo 1/8W,Emisores desde 5V
 RP01-RP12,12,Pullup receptor,47k ohm,Desde 3.3V
-RS01-RS12,12,Serie salida ADC,100 ohm,Una por canal
-CS01-CS12,12,Capacitor señal opcional,1nF ceramico,No sustituir por 100nF sin validar
-RB1-RB3,3,Pullup boton,10k ohm,A 3.3V
+RS01-RS12,12,Serie señal sensor,100 ohm,Antes del MUX
+CS01-CS12,12,Capacitor opcional,1nF por sensor,Antes del MUX no uno comun grande
+RSEL1-RSEL3,3,Pullup selector,10k ohm,C12/C13/C14 a 3.3V
+RBOOT2-RBOOT8,2,Pullup strapping,10k ohm,GPIO2/8 a 3.3V
+RIN1-RIN4,4,Pulldown direccion motor,10k ohm,A GND evita pulsos boot UART
 RPWMA-RPWMB,2,Pulldown PWM,10k ohm,A GND
-RSTBY,1,Pulldown STBY,10k ohm,A GND
-B1-B3,3,Pulsador,Normalmente abierto,A GND
-SW_STBY,1,Jumper o interruptor,STBY a 3.3V,Habilitacion fisica
-J1,1,Conector barra,1x15 polarizado preferible,Ver PINOUT.md
-CLED-CLOG,2,Desacoplo barra,100nF ceramico,Uno por rail
+RSTBY,1,Pulldown STBY,10k ohm,A GND despues de interruptor
+SEL,1,Selector rotativo,1P3T tres posiciones,COM a GND contactos C12..14
+SW_STBY,1,Interruptor habilitacion,Serie entre SIGNAL y STBY,STOP antes de cerrar
+J1,1,Conector barra,1x15 polarizado preferible,S01..12 mas 5V 3.3V GND
+J2,1,Conector MicroStart,3 contactos,Respetar orden fisico real
+J3,1,Conector selector,4 contactos,GND C12 C13 C14
+CLED-CLOG,2,Desacoplo barra,100nF,Uno por rail
 CLED_B-CLOG_B,2,Reserva barra,10uF,Uno por rail
-CVM-CVCC,2,Desacoplo driver,100nF ceramico,Descontar si modulo incluye
-CVM_B-CVCC_B,2,Reserva local driver,10uF,Descontar si modulo incluye
-CBULK,1,Reserva rail VM,470uF >=16V,Validar transitorios
-CM_L-CM_R,2,Filtro motor,100nF ceramico,Entre bornes
-M_L-M_R,2,Motor Pololu,6V modelo pendiente,Corriente bloqueo indispensable
+CMUX,1,Desacoplo MUX,100nF,Proximo a VCC
+CVM-CVCC,2,Desacoplo driver,100nF,Descontar si modulo incluye
+CVM_B-CVCC_B,2,Reserva driver,10uF,Descontar si modulo incluye
+CBULK,1,Reserva rail VM,470uF >=16V,Validar picos
+CM_L-CM_R,2,Filtro motor,100nF,Entre bornes
+M_L-M_R,2,Motor N20,6V 2000RPM,Corriente de bloqueo pendiente
 BAT,1,Bateria,LiPo 2S 7.4V nominal 8.4V cargada,Capacidad y descarga pendientes
 REG_LOGIC,1,Regulador logica,5V propuesta 2A,Entrada compatible 2S
-REG_MOTOR,1,Regulador motores,6V corriente por dimensionar,Tolerar frenado y transitorios
-PROTECT,1,Proteccion bateria y fusible,Segun consumo real,No implementada por firmware
-SW_POWER,1,Interruptor general,Dimensionado por corriente total,Entrada bateria
+REG_MOTOR,1,Regulador motor,6V corriente por dimensionar,Tolerar frenado y transitorios
+PROTECT,1,Proteccion bateria y fusible,Segun consumo,No implementada por firmware
+SW_POWER,1,Interruptor general,Segun corriente,Entrada bateria

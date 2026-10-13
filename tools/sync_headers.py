@@ -6,5 +6,5 @@ root=Path(__file__).resolve().parents[1]
 source=root/'firmware/UNiCUM/RMP_UNICUM'
 for sketch in (root/'firmware/pruebas').iterdir():
     if sketch.is_dir():
-        for name in ('Config.h','Hardware.h'):
+        for name in ('Config.h','Hardware.h','StartGate.h'):
             shutil.copyfile(source/name, sketch/name)
