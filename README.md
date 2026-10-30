@@ -1,6 +1,6 @@
 # RMP UNICUM · v0.2
 
-> **Ficha técnica:** [UNICUM en RMP Robotics](https://srampello.github.io/RMP/robots/unicum/) · Todos los robots en [srampello.github.io/RMP](https://srampello.github.io/RMP/)
+> **Sitio del robot:** [srampello.github.io/RMP_unicum](https://srampello.github.io/RMP_unicum/) · [Ficha en RMP Robotics](https://srampello.github.io/RMP/robots/unicum/) · [Todos los robots](https://srampello.github.io/RMP/)
 
 Seguidor de línea de **RMP Robotics**: **ESP32-C3 Super Mini**, barra de **12
 QRE1113GR**, **74HC4067**, **TB6612FNG**, dos **N20 6 V / 2000 RPM**, selector
